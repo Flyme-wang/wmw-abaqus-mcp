@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>v5.2.0 验证记录</title><link rel="stylesheet" href="../assets/publication.css"></head>
+<body><div class="layout"><nav aria-label="Documentation"><div class="brand latin">wmw-abaqus-mcp<br><span class="version">v5.2.0</span></div><a href="index.html"><span class="han">中文说明</span></a><a href="english.html">English</a><a href="changelog.html"><span class="han">版本记录</span> / Changelog</a><a class="active" aria-current="page" href="validation.html"><span class="han">验证范围</span> / Validation</a><a href="publication-style.html"><span class="han">排版</span> / Typography</a></nav>
+<main><div class="font-samples"><span id="font-zh-sample" class="han">中文：微软雅黑</span> · <span id="font-en-sample" class="latin">English: Times New Roman</span></div><h1 id="v520-验证记录">v5.2.0 <span class="han">验证记录</span></h1>
+<p><strong><span class="han">日期：</span>2026-10-15<span class="han">；范围：独立公开发布副本。</span></strong></p>
+<p><span class="han">原在用桥接的版本常量为</span> <strong>5.2.0</strong><span class="han">。本次同步保留通信及求解逻辑，只统一项目标识、</span>GUI <span class="han">菜单和包版本，更新可移植配置、文档及验证材料。</span></p>
+<h2 id="检查项目"><span class="han">检查项目</span></h2>
+<table>
+<thead>
+<tr>
+  <th><span class="han">项目</span></th>
+  <th><span class="han">实际结果</span></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>Python <span class="han">语法、</span>JSON<span class="han">、</span>TOML</td>
+  <td><span class="han">通过；版本元数据为</span> 5.2.0<span class="han">，</span>TOML <span class="han">无</span> BOM</td>
+</tr>
+<tr>
+  <td><span class="han">多端口与会话路由</span></td>
+  <td><strong>8 <span class="han">项</span> unittest <span class="han">通过</span></strong><span class="han">；两个</span> OS <span class="han">分配端口的</span> fake TCP bridge<span class="han">，禁止连接其他端点</span></td>
+</tr>
+<tr>
+  <td><span class="han">端口选择</span></td>
+  <td><span class="han">自动选择首个可用端口；显式端口成功、占用错误；范围耗尽错误</span></td>
+</tr>
+<tr>
+  <td>MCP stdio</td>
+  <td>initialize<span class="han">、</span>tools/list<span class="han">、</span>resources/list <span class="han">通过；名称</span> wmw-abaqus-mcp<span class="han">，</span><strong>16 tools<span class="han">、</span>4 resources</strong><span class="han">，未发出</span> CAE bridge <span class="han">请求</span></td>
+</tr>
+<tr>
+  <td><span class="han">工具参数</span></td>
+  <td>13 <span class="han">个</span> CAE <span class="han">工具均包含可选</span> session_id</td>
+</tr>
+<tr>
+  <td>Python <span class="han">打包</span></td>
+  <td>wheel <span class="han">构建、隔离</span> target <span class="han">安装</span>/import<span class="han">、</span>editable target <span class="han">安装通过</span></td>
+</tr>
+<tr>
+  <td><span class="han">源码追溯</span></td>
+  <td><span class="han">发布</span> Python <span class="han">文件与</span> source-manifest.json <span class="han">的</span> SHA-256 <span class="han">匹配；核心代码</span> diff <span class="han">仅为声明的名称</span>/<span class="han">菜单</span>/<span class="han">说明字符串</span></td>
+</tr>
+<tr>
+  <td><span class="han">公开文件</span></td>
+  <td>allowlist <span class="han">与敏感模式扫描通过，排除环境、缓存、模型、日志和结果</span></td>
+</tr>
+<tr>
+  <td><span class="han">本地</span> HTML</td>
+  <td>5 <span class="han">页；本地链接</span>/<span class="han">片段有效，代码可见文本与源</span> Markdown <span class="han">保持一致；安装</span>/<span class="han">操作文档</span> 12 <span class="han">个代码块实际复制通过（按</span> Windows <span class="han">换行规则核对）</span></td>
+</tr>
+<tr>
+  <td><span class="han">字体与布局</span></td>
+  <td>Chromium <span class="han">在</span> 1440 / 390 px <span class="han">预览；</span>CDP <span class="han">实测中文</span> Microsoft YaHei<span class="han">、英文</span> Times New Roman<span class="han">，无页面横向溢出或标题裁切</span></td>
+</tr>
+</tbody>
+</table>
+<p><span class="han">测试环境：</span><strong>Windows<span class="han">、</span>CPython 3.12.10<span class="han">、</span>MCP SDK 1.27.2</strong><span class="han">。打包时依赖按</span> pyproject.toml <span class="han">解析；没有将</span> <code>mcp&gt;=1.0</code> <span class="han">的所有版本都表述为已验证。</span></p>
+<p><span class="han">复核命令（使用已安装依赖的外部</span> Python<span class="han">）：</span></p>
+<pre><code class="language-powershell">python -B -m unittest discover -s tests -v
+python -B scripts/check_mcp_stdio.py
+python -m pip wheel --no-deps --wheel-dir .qa/wheels .
+python scripts/build_publication.py
+</code></pre>
+<h2 id="适用范围"><span class="han">适用范围</span></h2>
+<p><strong><span class="han">隔离测试使用</span> fake TCP JSON endpoints<span class="han">，不连接正在运行的</span> CAE<span class="han">。</span></strong> <span class="han">本次发布不重新启动</span> CAE<span class="han">、不修改现有模型、不提交求解器作业。</span></p>
+<p><span class="han">没有将离线检查或模型作业完成视为科学模型验收。未验证其他</span> Abaqus <span class="han">版本、</span>Linux/macOS GUI<span class="han">、远程网络部署或所有</span> ODB/<span class="han">截图工作流。</span><code>abaqus://status</code> <span class="han">与</span> <code>abaqus://session-telemetry</code> <span class="han">的默认端点限制保留并在</span> README <span class="han">明示。</span></p>
+<h2 id="源码追溯"><span class="han">源码追溯</span></h2>
+<p><a href="../source-manifest.json">source-manifest.json</a> <span class="han">保存原始主插件、</span>server<span class="han">、停止脚本与</span> loader <span class="han">的</span> SHA-256<span class="han">；发布副本仅做声明的品牌修改。发布</span> ZIP <span class="han">另附</span> SHA256SUMS<span class="han">。</span></p>
+
+<footer><span class="han">由仓库</span> Markdown <span class="han">生成本地</span> HTML<span class="han">；</span>GitHub <span class="han">原生</span> Markdown <span class="han">字体由平台控制。</span><br><a href="../validation.md"><span class="han">查看源文档</span></a></footer></main></div></body></html>

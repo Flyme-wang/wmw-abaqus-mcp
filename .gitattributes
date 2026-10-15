@@ -1,0 +1,3 @@
+* text=auto eol=lf
+# Preserve audited Python source bytes in source archives and raw downloads.
+*.py -text

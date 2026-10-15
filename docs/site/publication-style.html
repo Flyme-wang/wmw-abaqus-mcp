@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>发布排版</title><link rel="stylesheet" href="../assets/publication.css"></head>
+<body><div class="layout"><nav aria-label="Documentation"><div class="brand latin">wmw-abaqus-mcp<br><span class="version">v5.2.0</span></div><a href="index.html"><span class="han">中文说明</span></a><a href="english.html">English</a><a href="changelog.html"><span class="han">版本记录</span> / Changelog</a><a href="validation.html"><span class="han">验证范围</span> / Validation</a><a class="active" aria-current="page" href="publication-style.html"><span class="han">排版</span> / Typography</a></nav>
+<main><div class="font-samples"><span id="font-zh-sample" class="han">中文：微软雅黑</span> · <span id="font-en-sample" class="latin">English: Times New Roman</span></div><h1 id="发布排版"><span class="han">发布排版</span></h1>
+<ul>
+<li><span class="han">中文使用</span> <strong>Microsoft YaHei / <span class="han">微软雅黑</span></strong><span class="han">；英文、数字和单位使用</span> <strong>Times New Roman / <span class="han">新罗马</span></strong><span class="han">。</span></li>
+<li><span class="han">重点用粗体和蓝色</span> #1F4E79<span class="han">；适用范围用棕色</span> #8A5700<span class="han">，未经验证的结果不用验收通过色。</span></li>
+<li>GitHub Markdown <span class="han">不能强制字体。完整排版见</span> <code>docs/site/</code> <span class="han">本地</span> HTML<span class="han">；字体依赖系统安装，不随包分发。</span></li>
+<li><span class="han">复用</span> wmw-abaqus <span class="han">的</span> publication.css <span class="han">与中英文拆分规则，代码文本不改写。</span></li>
+</ul>
+<p><span class="han">在仓库根目录重建：</span></p>
+<pre><code class="language-powershell">python -m pip install &quot;mistune&gt;=3,&lt;4&quot;
+python scripts/build_publication.py
+</code></pre>
+<p><span class="han">推送前检查实际字体、粗体</span>/<span class="han">颜色、标题裁切、本地链接和命令复制。记录见</span> <a href="validation.html">validation.md</a><span class="han">。</span></p>
+
+<footer><span class="han">由仓库</span> Markdown <span class="han">生成本地</span> HTML<span class="han">；</span>GitHub <span class="han">原生</span> Markdown <span class="han">字体由平台控制。</span><br><a href="../publication_style.md"><span class="han">查看源文档</span></a></footer></main></div></body></html>

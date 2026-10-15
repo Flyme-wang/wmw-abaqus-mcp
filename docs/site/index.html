@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>wmw-abaqus-mcp</title><link rel="stylesheet" href="../assets/publication.css"></head>
+<body><div class="layout"><nav aria-label="Documentation"><div class="brand latin">wmw-abaqus-mcp<br><span class="version">v5.2.0</span></div><a class="active" aria-current="page" href="index.html"><span class="han">中文说明</span></a><a href="english.html">English</a><a href="changelog.html"><span class="han">版本记录</span> / Changelog</a><a href="validation.html"><span class="han">验证范围</span> / Validation</a><a href="publication-style.html"><span class="han">排版</span> / Typography</a></nav>
+<main><div class="font-samples"><span id="font-zh-sample" class="han">中文：微软雅黑</span> · <span id="font-en-sample" class="latin">English: Times New Roman</span></div><h1 id="wmw-abaqus-mcp">wmw-abaqus-mcp</h1>
+<p><strong>v5.2.0 · Abaqus/CAE <span class="han">多端口、多窗口</span> MCP <span class="han">插件</span></strong></p>
+<p><a href="english.html">English</a> · <a href="changelog.html"><span class="han">版本记录</span></a> · <a href="validation.html"><span class="han">验证范围</span></a> · <a href="index.html"><span class="han">本地排版版</span></a></p>
+<p><span class="han">把</span> MCP <span class="han">客户端连接到正在运行的</span> <strong>Abaqus/CAE</strong><span class="han">。每个</span> CAE <span class="han">窗口使用独立</span> TCP <span class="han">端口，默认范围为</span> <strong>48152–48162</strong><span class="han">；一个</span> MCP server <span class="han">可发现多个窗口、切换活动会话，并通过</span> <strong><code>session_id</code></strong> <span class="han">定向执行。</span></p>
+<blockquote class="callout important"><p><span class="callout-label"><span class="han">关键要求</span></span><span class="han">本仓库来自当前使用的</span> <strong>v5.2.0</strong> <span class="han">源码，名称统一为</span> <strong>wmw-abaqus-mcp</strong><span class="han">。保留原工具名、</span><code>ABAQUS_MCP_*</code> <span class="han">环境变量和通信协议。本次同步不改变建模或求解逻辑。</span></p>
+</blockquote>
+<h2 id="功能"><span class="han">功能</span></h2>
+<ul>
+<li><strong><span class="han">自动端口</span></strong><span class="han">：每个窗口选择范围内首个可用端口。</span></li>
+<li><strong><span class="han">指定端口</span></strong><span class="han">：菜单中直接选择端口；被占用时报告错误。</span></li>
+<li><strong><span class="han">多会话路由</span></strong><span class="han">：发现、列出、切换会话，模型操作支持</span> <code>session_id</code><span class="han">。</span></li>
+<li><strong>CAE <span class="han">交互</span></strong><span class="han">：执行</span> Python<span class="han">、查看模型、管理已有作业、读取</span> ODB <span class="han">元数据、抓取视口图像。</span></li>
+<li><strong><span class="han">本地桥接</span></strong><span class="han">：外部</span> MCP server <span class="han">通过</span> stdio <span class="han">提供工具；</span>GUI <span class="han">线程调度，再经</span> <code>sendCommand</code> <span class="han">进入</span> Abaqus kernel<span class="han">。</span></li>
+</ul>
+<p><span class="han">每个窗口内的请求受该</span> CAE GUI/kernel <span class="han">状态约束；多端口不代表同一窗口可并行执行多个内核脚本。</span></p>
+<h2 id="安装"><span class="han">安装</span></h2>
+<p><span class="han">需要可用的</span> <strong>Abaqus/CAE <span class="han">许可证</span></strong><span class="han">和外部</span> <strong>Python 3.10+</strong><span class="han">。无需在</span> CAE Python <span class="han">中安装</span> MCP<span class="han">。兼容性范围见</span><a href="validation.html"><span class="han">验证记录</span></a><span class="han">。</span></p>
+<pre><code class="language-powershell">git clone https://github.com/Flyme-wang/wmw-abaqus-mcp.git
+cd wmw-abaqus-mcp
+py -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e .
+</code></pre>
+<p><span class="han">在仓库根目录设置用户环境和菜单加载器。</span><strong><span class="han">若已有同名目录，先备份原目录，再合并</span> loader <span class="han">文件。</span></strong> <span class="han">保留已有</span> <code>abaqus_v6.env</code><span class="han">。</span></p>
+<pre><code class="language-powershell">$repoPath = (Get-Location).Path
+[Environment]::SetEnvironmentVariable('ABAQUS_MCP_HOME', $repoPath, 'User')
+$env:ABAQUS_MCP_HOME = $repoPath
+$loaderPath = Join-Path $env:USERPROFILE 'abaqus_plugins\mcp_control'
+New-Item -ItemType Directory -Path $loaderPath -Force | Out-Null
+Copy-Item -LiteralPath (Join-Path $repoPath 'abaqus_plugins\mcp_control\__init__.py') -Destination $loaderPath
+Copy-Item -LiteralPath (Join-Path $repoPath 'abaqus_plugins\mcp_control\mcp_control_plugin.py') -Destination $loaderPath
+</code></pre>
+<p><span class="han">从继承该环境变量的新终端启动</span> CAE<span class="han">；正常使用请重启</span> CAE<span class="han">。菜单为：</span></p>
+<pre><code class="language-text">Plug-ins &gt; wmw-abaqus-mcp &gt; Start Socket Bridge &gt; Auto Port
+Plug-ins &gt; wmw-abaqus-mcp &gt; Start Socket Bridge &gt; Port 48152
+...
+Plug-ins &gt; wmw-abaqus-mcp &gt; Start Socket Bridge &gt; Port 48162
+Plug-ins &gt; wmw-abaqus-mcp &gt; Bridge Status
+Plug-ins &gt; wmw-abaqus-mcp &gt; Stop Socket Bridge
+</code></pre>
+<p><span class="han">也可参考</span> <a href="../../abaqus_v6.env.example"><code>abaqus_v6.env.example</code></a> <span class="han">合并启动钩子；</span><strong><span class="han">加载器和启动钩子二选一即可</span></strong><span class="han">，保留已有设置。</span></p>
+<h2 id="mcp-客户端">MCP <span class="han">客户端</span></h2>
+<p><span class="han">参考</span> <a href="../../examples/mcp_config.example.json"><code>examples/mcp_config.example.json</code></a><span class="han">，替换</span> <code>C:\path\to\wmw-abaqus-mcp</code> <span class="han">为仓库绝对路径。</span><code>ABAQUS_MCP_HOME</code> <span class="han">必须在</span> <strong>CAE <span class="han">进程</span></strong><span class="han">启动前设置；只写在</span> MCP <span class="han">客户端环境中不会传入已打开的</span> CAE<span class="han">。</span></p>
+<p><a href="../../.env.example"><code>.env.example</code></a> <span class="han">仅是变量说明，程序不会自动加载</span> <code>.env</code><span class="han">。两个进程使用相同</span> host <span class="han">和端口范围。修改</span> <code>ABAQUS_MCP_PORT_RANGE_START</code> / <code>ABAQUS_MCP_PORT_RANGE_END</code> <span class="han">后重启对应进程。可选</span> <code>ABAQUS_MCP_AUTOSTART=1</code> <span class="han">按</span> <code>ABAQUS_MCP_PORT</code> <span class="han">固定端口启动，</span><strong><span class="han">不会自动选择空闲端口</span></strong><span class="han">。</span></p>
+<h2 id="两个窗口的连接流程"><span class="han">两个窗口的连接流程</span></h2>
+<ol>
+<li><span class="han">窗口</span> A <span class="han">选择</span> <strong>Port 48152</strong><span class="han">，窗口</span> B <span class="han">选择</span> <strong>Port 48153</strong><span class="han">；或分别使用</span> <strong>Auto Port</strong><span class="han">。</span></li>
+<li><span class="han">客户端调用</span> <strong><code>discover_sessions()</code></strong><span class="han">，逐端口</span> TCP ping <span class="han">并登记可达会话。</span></li>
+<li><span class="han">用</span> <strong><code>list_sessions()</code></strong> <span class="han">获取</span> <code>session_id</code><span class="han">、端口及活动标记，默认示例为</span> <code>session_48152</code><span class="han">、</span><code>session_48153</code><span class="han">。</span></li>
+<li><span class="han">用</span> <strong><code>set_active_session(session_id=&quot;session_48153&quot;)</code></strong> <span class="han">切换后续操作，或在工具中直接传入</span> <code>session_id</code><span class="han">。</span></li>
+<li><span class="han">建模前核对目标会话、模型和工作目录。</span></li>
+</ol>
+<p><span class="han">下面是客户端发送的</span> <strong>MCP <span class="han">工具名与参数</span></strong><span class="han">，不是</span> Abaqus <span class="han">命令区脚本：</span></p>
+<pre><code class="language-json">{&quot;name&quot;:&quot;discover_sessions&quot;,&quot;arguments&quot;:{}}
+{&quot;name&quot;:&quot;list_sessions&quot;,&quot;arguments&quot;:{}}
+{&quot;name&quot;:&quot;ping&quot;,&quot;arguments&quot;:{&quot;session_id&quot;:&quot;session_48153&quot;}}
+{&quot;name&quot;:&quot;run_python&quot;,&quot;arguments&quot;:{&quot;code&quot;:&quot;list(mdb.models.keys())&quot;,&quot;session_id&quot;:&quot;session_48153&quot;}}
+{&quot;name&quot;:&quot;set_active_session&quot;,&quot;arguments&quot;:{&quot;session_id&quot;:&quot;session_48153&quot;}}
+</code></pre>
+<p><strong><span class="han">未登记活动会话时，工具回退到</span> <code>ABAQUS_MCP_PORT</code><span class="han">，默认</span> 48152<span class="han">。</span></strong> <span class="han">选择</span> Port 48154 <span class="han">后直接调用无参数</span> <code>ping</code><span class="han">，不保证连接该窗口。</span><code>list_sessions</code> <span class="han">只列登记缓存，不扫描或自动清理失效项。</span></p>
+<h2 id="工具与资源"><span class="han">工具与资源</span></h2>
+<p><strong><span class="han">会话工具</span></strong><span class="han">：</span><code>discover_sessions</code><span class="han">、</span><code>list_sessions</code><span class="han">、</span><code>set_active_session</code><span class="han">。</span></p>
+<p><strong>CAE <span class="han">工具</span></strong><span class="han">：</span><code>ping</code><span class="han">、</span><code>check_abaqus_connection</code><span class="han">、</span><code>run_python</code><span class="han">、</span><code>execute_script</code><span class="han">、</span><code>set_workdir</code><span class="han">、</span><code>get_model_info</code><span class="han">、</span><code>list_jobs</code><span class="han">、</span><code>submit_job</code><span class="han">、</span><code>monitor_job_status</code><span class="han">、</span><code>inspect_odb</code><span class="han">、</span><code>get_odb_info</code><span class="han">、</span><code>capture_viewport</code><span class="han">、</span><code>get_viewport_image</code><span class="han">。以上工具均支持可选</span> <code>session_id</code><span class="han">。</span></p>
+<table>
+<thead>
+<tr>
+  <th><span class="han">资源</span></th>
+  <th><span class="han">当前行为</span></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td><code>abaqus://sessions</code></td>
+  <td><span class="han">返回已登记会话</span></td>
+</tr>
+<tr>
+  <td><code>abaqus://status</code></td>
+  <td><span class="han">查询默认</span> host/port</td>
+</tr>
+<tr>
+  <td><code>abaqus://session-telemetry</code></td>
+  <td><span class="han">查询默认</span> host/port<span class="han">，不跟随活动会话</span></td>
+</tr>
+<tr>
+  <td><code>abaqus://agent-instructions</code></td>
+  <td><span class="han">返回操作指南</span></td>
+</tr>
+</tbody>
+</table>
+<p><span class="han">查询特定窗口请用</span> <strong><code>ping(session_id=...)</code></strong><span class="han">。插件在系统临时目录写发现文件；当前</span> server <span class="han">通过端口扫描发现窗口，不读取这些文件。</span></p>
+<p><span class="han">停止脚本按环境变量指定端口连接，</span><strong><span class="han">不会停止所有会话</span></strong><span class="han">：</span></p>
+<pre><code class="language-powershell">$env:ABAQUS_MCP_PORT = '48153'
+.\.venv\Scripts\python.exe .\stop_mcp.py
+</code></pre>
+<blockquote class="callout note"><p><span class="callout-label"><span class="han">说明</span></span><span class="han">桥接允许执行本机</span> Abaqus Python<span class="han">，请保留默认</span> <strong>127.0.0.1</strong><span class="han">，供可信本地客户端使用。协议没有网络认证或</span> TLS<span class="han">。发布包不包含许可证、模型、</span>ODB<span class="han">、日志、虚拟环境及本机配置。</span></p>
+</blockquote>
+<h2 id="验证与排版"><span class="han">验证与排版</span></h2>
+<p><span class="han">隔离的多端口路由检查：</span></p>
+<pre><code class="language-powershell">.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+</code></pre>
+<p><span class="han">范围与局限见</span> <a href="validation.html">docs/validation.md</a><span class="han">。源码指纹及品牌调整见</span> <a href="../source-manifest.json">docs/source-manifest.json</a><span class="han">。</span></p>
+<p>GitHub Markdown <span class="han">字体由平台控制。本地</span> HTML <span class="han">使用</span> <strong><span class="han">中文</span> Microsoft YaHei<span class="han">、英文</span>/<span class="han">数字</span> Times New Roman</strong><span class="han">；重点用粗体与蓝色，适用范围用棕色。下载仓库后打开</span> <strong><a href="index.html">docs/site/index.html</a></strong><span class="han">。重建见</span><a href="publication-style.html"><span class="han">排版规则</span></a><span class="han">。</span></p>
+<h2 id="许可与来源"><span class="han">许可与来源</span></h2>
+<p><a href="../../LICENSE">MIT License</a><span class="han">。独立仓库提取自</span> <a href="https://github.com/Cai-aa/CAE-Agent-Hub">CAE-Agent-Hub</a> <span class="han">的</span> <code>MCP/Abaqus</code><span class="han">，保留上游归属。</span>GUI socket <span class="han">架构参考</span> <a href="https://github.com/Whfkl/Abaqus-Control-MCP">Whfkl/Abaqus-Control-MCP</a><span class="han">，见</span> <a href="../../THIRD_PARTY_NOTICES.md">THIRD_PARTY_NOTICES.md</a><span class="han">。仓库不包含</span> Abaqus <span class="han">二进制或许可证。</span></p>
+
+<footer><span class="han">由仓库</span> Markdown <span class="han">生成本地</span> HTML<span class="han">；</span>GitHub <span class="han">原生</span> Markdown <span class="han">字体由平台控制。</span><br><a href="../../README.md"><span class="han">查看源文档</span></a></footer></main></div></body></html>

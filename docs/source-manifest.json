@@ -1,0 +1,28 @@
+{
+  "version": "5.2.0",
+  "source_project": "CAE-Agent-Hub/MCP/Abaqus",
+  "captured_on": "2026-10-15",
+  "changes": "Project branding, MCP server display name, and GUI menu labels only in the two main Python files; other recorded Python files remain byte-identical. No model or solver changes.",
+  "files": [
+    {
+      "path": "abaqus_mcp_plugin.py",
+      "source_sha256": "ccc40576da95e899d85c9baa1c40cb24ab73cbf0059ad185c4915bd37748c4d0",
+      "published_sha256": "6da6afd0f71db453f0caf8807cc1b25772f83b90c67aeb3262a8d6def85d71ae"
+    },
+    {
+      "path": "mcp_server.py",
+      "source_sha256": "9389cc30a4bc330c3797ab58043c1d59fbca9b3a73120c9aaedc00aa0fe6f298",
+      "published_sha256": "c4e95941d661f1ab7a7e8c21f69ae6f9ecf10907c709e3820f2408488abebab2"
+    },
+    {
+      "path": "stop_mcp.py",
+      "source_sha256": "299e64bf8d1a84d2abf358276448950929f08f89c83d9f97d9d57ff86a73e869",
+      "published_sha256": "299e64bf8d1a84d2abf358276448950929f08f89c83d9f97d9d57ff86a73e869"
+    },
+    {
+      "path": "abaqus_plugins/mcp_control/mcp_control_plugin.py",
+      "source_sha256": "6dbff2e6bc9e6b1871a521b3223c6f6d2bcf3624310feb517f81c06b8b1cd8df",
+      "published_sha256": "6dbff2e6bc9e6b1871a521b3223c6f6d2bcf3624310feb517f81c06b8b1cd8df"
+    }
+  ]
+}

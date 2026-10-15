@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>wmw-abaqus-mcp</title><link rel="stylesheet" href="../assets/publication.css"></head>
+<body><div class="layout"><nav aria-label="Documentation"><div class="brand latin">wmw-abaqus-mcp<br><span class="version">v5.2.0</span></div><a href="index.html"><span class="han">中文说明</span></a><a class="active" aria-current="page" href="english.html">English</a><a href="changelog.html"><span class="han">版本记录</span> / Changelog</a><a href="validation.html"><span class="han">验证范围</span> / Validation</a><a href="publication-style.html"><span class="han">排版</span> / Typography</a></nav>
+<main><div class="font-samples"><span id="font-zh-sample" class="han">中文：微软雅黑</span> · <span id="font-en-sample" class="latin">English: Times New Roman</span></div><h1 id="wmw-abaqus-mcp">wmw-abaqus-mcp</h1>
+<p><strong>v5.2.0 · Multi-port, multi-window Abaqus/CAE MCP bridge</strong></p>
+<p><a href="index.html"><span class="han">中文</span></a> · <a href="changelog.html">Changelog</a> · <a href="validation.html">Validation</a> · <a href="english.html">Local HTML</a></p>
+<p>Connect an MCP client to one or more live <strong>Abaqus/CAE</strong> windows. Each window binds its own TCP port, normally <strong>48152–48162</strong>. One external MCP server discovers these bridges and routes tools to an active session or an explicit <strong><code>session_id</code></strong>.</p>
+<p>This repository publishes the existing v5.2.0 implementation under <strong>wmw-abaqus-mcp</strong>. Package metadata, MCP server name and GUI menu labels are aligned. Existing tool names, environment variables and wire protocol are preserved. Model and solver logic is unchanged.</p>
+<h2 id="install">Install</h2>
+<p>Use an external <strong>Python 3.10+</strong> interpreter and a licensed Abaqus/CAE installation. Do not install the MCP SDK into Abaqus Python. See the <a href="validation.html">validation scope</a> before assuming compatibility with another CAE version.</p>
+<pre><code class="language-powershell">git clone https://github.com/Flyme-wang/wmw-abaqus-mcp.git
+cd wmw-abaqus-mcp
+py -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e .
+</code></pre>
+<p>From the repository root, set the GUI bridge location and install the loader. Back up an existing loader before merging these files.</p>
+<pre><code class="language-powershell">$repoPath = (Get-Location).Path
+[Environment]::SetEnvironmentVariable('ABAQUS_MCP_HOME', $repoPath, 'User')
+$env:ABAQUS_MCP_HOME = $repoPath
+$loaderPath = Join-Path $env:USERPROFILE 'abaqus_plugins\mcp_control'
+New-Item -ItemType Directory -Path $loaderPath -Force | Out-Null
+Copy-Item -LiteralPath (Join-Path $repoPath 'abaqus_plugins\mcp_control\__init__.py') -Destination $loaderPath
+Copy-Item -LiteralPath (Join-Path $repoPath 'abaqus_plugins\mcp_control\mcp_control_plugin.py') -Destination $loaderPath
+</code></pre>
+<p>Start a new CAE process from a terminal that inherits this variable. The menu is <strong>Plug-ins &gt; wmw-abaqus-mcp</strong>. Choose <strong>Start Socket Bridge &gt; Auto Port</strong> or <strong>Port 48152</strong> through <strong>Port 48162</strong>. An occupied explicit port reports an error instead of falling back to another port.</p>
+<p>As an alternative to the loader, merge the hook from <a href="../../abaqus_v6.env.example"><code>abaqus_v6.env.example</code></a> into your existing environment file; preserve existing startup configuration. One loading method is sufficient.</p>
+<h2 id="configure-the-mcp-client">Configure the MCP client</h2>
+<p>Use <a href="../../examples/mcp_config.example.json"><code>examples/mcp_config.example.json</code></a> and replace <code>C:\path\to\wmw-abaqus-mcp</code> with your absolute repository path. <code>ABAQUS_MCP_HOME</code> must reach the <strong>CAE process</strong>; configuring it only for the external client cannot update an already running CAE process.</p>
+<p><a href="../../.env.example"><code>.env.example</code></a> documents the variables; the programs do <strong>not</strong> load <code>.env</code> automatically. Set the host and port range consistently for both processes. Restart them after changing the range. Optional <code>ABAQUS_MCP_AUTOSTART=1</code> uses the fixed <code>ABAQUS_MCP_PORT</code>, rather than selecting a free port.</p>
+<h2 id="connect-two-windows">Connect two windows</h2>
+<ol>
+<li>Start window A on <strong>Port 48152</strong> and B on <strong>Port 48153</strong>, or use Auto Port in each.</li>
+<li>Call <strong><code>discover_sessions()</code></strong> from your MCP client. It probes the configured port range with TCP ping.</li>
+<li>Call <strong><code>list_sessions()</code></strong> to inspect registered IDs, endpoints and the active flag.</li>
+<li>Use <strong><code>set_active_session(session_id=&quot;session_48153&quot;)</code></strong>, or pass the ID directly to a tool.</li>
+<li>Check the target model and working directory before modifying a model or submitting a job.</li>
+</ol>
+<p>Example <strong>MCP tool requests</strong>, not Abaqus console scripts:</p>
+<pre><code class="language-json">{&quot;name&quot;:&quot;discover_sessions&quot;,&quot;arguments&quot;:{}}
+{&quot;name&quot;:&quot;list_sessions&quot;,&quot;arguments&quot;:{}}
+{&quot;name&quot;:&quot;ping&quot;,&quot;arguments&quot;:{&quot;session_id&quot;:&quot;session_48153&quot;}}
+{&quot;name&quot;:&quot;run_python&quot;,&quot;arguments&quot;:{&quot;code&quot;:&quot;list(mdb.models.keys())&quot;,&quot;session_id&quot;:&quot;session_48153&quot;}}
+</code></pre>
+<p>Without a registered active session, tools fall back to <code>ABAQUS_MCP_PORT</code>, normally <strong>48152</strong>. Selecting a different GUI port alone does not change that fallback. <code>list_sessions</code> returns cached registrations; it neither scans nor removes stale entries. The bridge writes temporary discovery files, but the current server discovers windows by port probing instead of reading those files.</p>
+<h2 id="tools-and-resources">Tools and resources</h2>
+<p>Session tools: <strong><code>discover_sessions</code></strong>, <strong><code>list_sessions</code></strong>, <strong><code>set_active_session</code></strong>.</p>
+<p>CAE tools, each accepting an optional <code>session_id</code>: <code>ping</code>, <code>check_abaqus_connection</code>, <code>run_python</code>, <code>execute_script</code>, <code>set_workdir</code>, <code>get_model_info</code>, <code>list_jobs</code>, <code>submit_job</code>, <code>monitor_job_status</code>, <code>inspect_odb</code>, <code>get_odb_info</code>, <code>capture_viewport</code>, <code>get_viewport_image</code>.</p>
+<table>
+<thead>
+<tr>
+  <th>Resource</th>
+  <th>Behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td><code>abaqus://sessions</code></td>
+  <td>Registered sessions</td>
+</tr>
+<tr>
+  <td><code>abaqus://status</code></td>
+  <td>Default host/port</td>
+</tr>
+<tr>
+  <td><code>abaqus://session-telemetry</code></td>
+  <td>Default host/port; does not follow active session</td>
+</tr>
+<tr>
+  <td><code>abaqus://agent-instructions</code></td>
+  <td>Operation guidance</td>
+</tr>
+</tbody>
+</table>
+<p>Use <strong><code>ping(session_id=...)</code></strong> for a specific window&#x27;s telemetry. Requests within a CAE window remain subject to its GUI/kernel execution state.</p>
+<p>To stop one bridge, set its port explicitly:</p>
+<pre><code class="language-powershell">$env:ABAQUS_MCP_PORT = '48153'
+.\.venv\Scripts\python.exe .\stop_mcp.py
+</code></pre>
+<p>The stop script does not stop all sessions. Keep the default <strong>127.0.0.1</strong> for trusted local use: the bridge executes Python and provides no authentication or TLS.</p>
+<h2 id="validation-source-and-presentation">Validation, source and presentation</h2>
+<pre><code class="language-powershell">.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+</code></pre>
+<p>Tests use isolated fake endpoints. They do not establish CAE integration or solver correctness. See <a href="validation.html">validation</a> and <a href="../source-manifest.json">source fingerprints</a>.</p>
+<p>GitHub controls Markdown fonts. The downloadable local <a href="english.html">HTML edition</a> uses <strong>Microsoft YaHei for Chinese</strong> and <strong>Times New Roman for English/numbers</strong>. See the <a href="publication-style.html">publication policy</a> to rebuild it.</p>
+<h2 id="license">License</h2>
+<p><a href="../../LICENSE">MIT</a>. Extracted from the local <code>MCP/Abaqus</code> implementation of <a href="https://github.com/Cai-aa/CAE-Agent-Hub">CAE-Agent-Hub</a>. The GUI socket architecture references <a href="https://github.com/Whfkl/Abaqus-Control-MCP">Whfkl/Abaqus-Control-MCP</a>; attribution is preserved in <a href="../../THIRD_PARTY_NOTICES.md">THIRD_PARTY_NOTICES.md</a>. No Abaqus binaries, license files, models, ODBs, runtime logs, virtual environments or private configuration are included.</p>
+
+<footer>Generated from repository Markdown. GitHub controls native Markdown fonts.<br><a href="../../README.en.md">View source</a></footer></main></div></body></html>
