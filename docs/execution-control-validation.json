@@ -1,0 +1,45 @@
+{
+  "version": "6.0.0",
+  "date": "2026-10-23",
+  "timezone": "Asia/Shanghai",
+  "scope": "offline_source_candidate",
+  "base_commit": "52c3ad5cb6878e8c375ca092d311930194ef65a8",
+  "checks": {
+    "unittest": {
+      "passed": 64,
+      "failed": 0,
+      "command": "python -B -m unittest discover -s tests -v"
+    },
+    "stdio": {
+      "tools": 17,
+      "resources": 4,
+      "bridge_calls": 0
+    },
+    "syntax": "Python 3.10 grammar and CPython 3.12.10 compile passed",
+    "wheel": "Built and imported from an isolated target; includes bridge_runtime",
+    "documentation": {
+      "pages": 5,
+      "preview_widths_px": [
+        1440,
+        390
+      ],
+      "page_horizontal_overflow": false,
+      "actual_cjk_font": "Microsoft YaHei",
+      "actual_latin_font": "Times New Roman"
+    },
+    "independent_spec_review": "passed_after_corrections",
+    "independent_code_quality_review": "approved_offline_scope_after_corrections"
+  },
+  "not_performed": [
+    "live CAE integration",
+    "large CAE freeze benchmark",
+    "real solver submission",
+    "live source/cache/config/environment changes",
+    "GitHub Release publication"
+  ],
+  "limits": [
+    "Native sendCommand latency and GIL behavior remain unverified",
+    "Abaqus wrapper weak-reference/identity compatibility remains unverified; explicit fallback applies",
+    "History is process-local and bounded; unknown results never authorize automatic replay"
+  ]
+}

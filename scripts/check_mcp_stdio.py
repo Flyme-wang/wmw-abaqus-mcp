@@ -25,12 +25,15 @@ async def main():
                 "check_abaqus_connection", "run_python", "execute_script", "set_workdir",
                 "get_model_info", "list_jobs", "submit_job", "monitor_job_status",
                 "inspect_odb", "get_odb_info", "capture_viewport", "get_viewport_image",
+                "get_request_status",
             }
             assert {tool.name for tool in tools} == expected
             session_tools = {"discover_sessions", "list_sessions", "set_active_session"}
             for tool in tools:
                 if tool.name not in session_tools:
                     assert "session_id" in tool.inputSchema["properties"], tool.name
+                if tool.name in {"run_python", "execute_script", "submit_job", "get_request_status"}:
+                    assert "request_id" in tool.inputSchema["properties"], tool.name
             assert {str(resource.uri) for resource in resources} == {
                 "abaqus://sessions", "abaqus://status", "abaqus://session-telemetry",
                 "abaqus://agent-instructions",

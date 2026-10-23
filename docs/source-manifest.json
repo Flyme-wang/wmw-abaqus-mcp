@@ -1,28 +1,40 @@
 {
-  "version": "5.2.0",
+  "version": "6.0.0",
+  "baseline_version": "5.2.0",
+  "base_commit": "52c3ad5cb6878e8c375ca092d311930194ef65a8",
   "source_project": "CAE-Agent-Hub/MCP/Abaqus",
-  "captured_on": "2026-10-15",
-  "changes": "Project branding, MCP server display name, and GUI menu labels only in the two main Python files; other recorded Python files remain byte-identical. No model or solver changes.",
+  "captured_on": "2026-10-23",
+  "status": "source_candidate_no_release",
+  "changes": "Single-operation admission, GUI short result polling, stable request lifecycle and status-only timeout recovery, submission/monitor separation, bounded identity-aware monitoring. No live deployment, model or solver changes.",
   "files": [
     {
       "path": "abaqus_mcp_plugin.py",
       "source_sha256": "ccc40576da95e899d85c9baa1c40cb24ab73cbf0059ad185c4915bd37748c4d0",
-      "published_sha256": "6da6afd0f71db453f0caf8807cc1b25772f83b90c67aeb3262a8d6def85d71ae"
+      "baseline_published_sha256": "6da6afd0f71db453f0caf8807cc1b25772f83b90c67aeb3262a8d6def85d71ae",
+      "candidate_sha256": "67f756e7758872bb7d26f1af30a2b9c8526e6659084deb9a613b65ed27a9fc5a"
     },
     {
       "path": "mcp_server.py",
       "source_sha256": "9389cc30a4bc330c3797ab58043c1d59fbca9b3a73120c9aaedc00aa0fe6f298",
-      "published_sha256": "c4e95941d661f1ab7a7e8c21f69ae6f9ecf10907c709e3820f2408488abebab2"
+      "baseline_published_sha256": "c4e95941d661f1ab7a7e8c21f69ae6f9ecf10907c709e3820f2408488abebab2",
+      "candidate_sha256": "3e188644b5da8974fedb9e0cac803c9615c954508776d0c9248204137a688432"
     },
     {
       "path": "stop_mcp.py",
       "source_sha256": "299e64bf8d1a84d2abf358276448950929f08f89c83d9f97d9d57ff86a73e869",
-      "published_sha256": "299e64bf8d1a84d2abf358276448950929f08f89c83d9f97d9d57ff86a73e869"
+      "baseline_published_sha256": "299e64bf8d1a84d2abf358276448950929f08f89c83d9f97d9d57ff86a73e869",
+      "candidate_sha256": "299e64bf8d1a84d2abf358276448950929f08f89c83d9f97d9d57ff86a73e869"
     },
     {
       "path": "abaqus_plugins/mcp_control/mcp_control_plugin.py",
       "source_sha256": "6dbff2e6bc9e6b1871a521b3223c6f6d2bcf3624310feb517f81c06b8b1cd8df",
-      "published_sha256": "6dbff2e6bc9e6b1871a521b3223c6f6d2bcf3624310feb517f81c06b8b1cd8df"
+      "baseline_published_sha256": "6dbff2e6bc9e6b1871a521b3223c6f6d2bcf3624310feb517f81c06b8b1cd8df",
+      "candidate_sha256": "309a2629b882e9ea99911157f72cd14e94893b2dd24823d935c53b819ecad933"
+    },
+    {
+      "path": "bridge_runtime.py",
+      "new_in": "6.0.0",
+      "candidate_sha256": "6e5a171aae0186d5580dcf30b975a33ea34c79270fb853ef3663287554ec6a70"
     }
   ]
 }

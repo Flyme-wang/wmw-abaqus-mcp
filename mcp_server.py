@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-wmw-abaqus-mcp Server v5.2.0 - Multi-Session Support.
+wmw-abaqus-mcp Server v6.0.0 - recoverable single-flight execution.
 
 This stdio MCP server talks to one or more live Abaqus/CAE GUI bridges over
 local TCP sockets. Each Abaqus/CAE instance runs its own socket bridge on a
@@ -18,6 +18,9 @@ import tempfile
 from typing import Any
 import os
 import asyncio
+from collections import OrderedDict
+import math
+import time
 
 from mcp.server.fastmcp import FastMCP
 
@@ -47,6 +50,20 @@ Multi-Session Support (v5.1+):
 - Pass session_id parameter to run_python/execute_script for direct targeting
   without switching the active session.
 - Each Abaqus/CAE instance uses a unique port (48152-48162).
+
+Recoverable single-flight execution (v6.0+):
+- Save the original request_id and session_id for every execution/submission.
+  On BUSY, timeout_pending, or unknown, never automatically replay with a new request_id.
+  Query get_request_status(original_request_id, session_id) on the same session;
+  BUSY also identifies active_request_id. An unknown/evicted result is not proof
+  that execution did not happen. Do not auto-unlock, restart, or terminate work.
+- submit_job returns a submission acknowledgement, not solver completion.
+  Read actual progress and status separately with monitor_job_status.
+- ping never injects a kernel command. kernel_response_observed records only a
+  past valid wrapper response. kernel_ready is false while bridge work is busy,
+  null before any response was observed, and true otherwise. This is bridge
+  admission information, not a guarantee about manual kernel work or native
+  sendCommand blocking/GIL behavior. Always inspect busy and operation status.
 """
 
 mcp = FastMCP("wmw-abaqus-mcp", instructions=INSTRUCTIONS)
@@ -54,6 +71,31 @@ mcp = FastMCP("wmw-abaqus-mcp", instructions=INSTRUCTIONS)
 
 class ProtocolError(RuntimeError):
     """Raised when the Abaqus GUI bridge returns malformed protocol data."""
+
+
+class RequestError(RuntimeError):
+    """Structured bridge outcome, also readable by clients that display text."""
+
+    def __init__(self, code: str, message: str, **details: Any):
+        self.code = code
+        self.details = details
+        suffix = ", ".join(f"{key}={value}" for key, value in details.items())
+        super().__init__(f"{code}: {message}" + (f" ({suffix})" if suffix else ""))
+
+
+# Routing hints only, bounded and local to this MCP process. Explicit session_id
+# always wins. The bridge registry remains the source of operation outcomes.
+_request_endpoints: OrderedDict[str, tuple[str, int] | None] = OrderedDict()
+
+
+def _remember_endpoint(request_id: str, endpoint: tuple[str, int]) -> None:
+    if request_id in _request_endpoints and _request_endpoints[request_id] != endpoint:
+        _request_endpoints[request_id] = None  # same ID used on several sessions
+    else:
+        _request_endpoints[request_id] = endpoint
+    _request_endpoints.move_to_end(request_id)
+    while len(_request_endpoints) > 512:
+        _request_endpoints.popitem(last=False)
 
 
 # ---------------------------------------------------------------------------
@@ -146,7 +188,7 @@ class SessionManager:
                         "params": {"timeout": 3.0},
                     }
                     _send_message(sock, payload)
-                    resp = _read_message(sock)
+                    resp = _read_message(sock, io_timeout=3.0)
                     if resp.get("ok") and resp.get("result"):
                         info = resp["result"]
                         sid = self.add(DEFAULT_HOST, port, info)
@@ -173,26 +215,34 @@ def _send_message(sock: socket.socket, payload: dict[str, Any]) -> None:
     sock.sendall(data + b"\n")
 
 
-def _read_message(sock: socket.socket, max_bytes: int = MAX_MESSAGE_BYTES) -> dict[str, Any]:
+def _read_message(sock: socket.socket, max_bytes: int = MAX_MESSAGE_BYTES, io_timeout: float = DEFAULT_TIMEOUT) -> dict[str, Any]:
     chunks: list[bytes] = []
     total = 0
+    deadline = time.monotonic() + io_timeout
 
     while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("socket message deadline elapsed")
+        sock.settimeout(remaining)
         chunk = sock.recv(4096)
         if not chunk:
             raise ProtocolError("socket closed before a complete message was received")
 
         newline = chunk.find(b"\n")
+        total += newline if newline >= 0 else len(chunk)
+        if total > max_bytes:
+            raise ProtocolError(f"message exceeded {max_bytes} bytes")
         if newline >= 0:
             chunks.append(chunk[:newline])
             break
 
         chunks.append(chunk)
-        total += len(chunk)
-        if total > max_bytes:
-            raise ProtocolError(f"message exceeded {max_bytes} bytes")
 
-    message = json.loads(b"".join(chunks).decode("utf-8"))
+    try:
+        message = json.loads(b"".join(chunks).decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ProtocolError("Abaqus bridge returned invalid UTF-8/JSON: %s" % exc) from exc
     if not isinstance(message, dict):
         raise ProtocolError("protocol message must be a JSON object")
     return message
@@ -204,29 +254,30 @@ def _request(
     timeout: float | None = None,
     host: str | None = None,
     port: int | None = None,
+    request_id: str | None = None,
 ) -> dict[str, Any]:
     effective_timeout = timeout if timeout is not None else DEFAULT_TIMEOUT
+    if not math.isfinite(effective_timeout) or effective_timeout <= 0:
+        raise ValueError("timeout must be finite and positive")
     effective_host = host or DEFAULT_HOST
     effective_port = port or DEFAULT_PORT
     payload = {
-        "id": str(uuid.uuid4()),
+        "id": request_id if request_id is not None else str(uuid.uuid4()),
         "method": method,
         "params": {**(params or {}), "timeout": effective_timeout},
     }
-
     with socket.create_connection((effective_host, effective_port), timeout=effective_timeout) as sock:
         sock.settimeout(effective_timeout)
         _send_message(sock, payload)
-        response = _read_message(sock)
-
+        response = _read_message(sock, io_timeout=effective_timeout)
     if response.get("id") != payload["id"]:
         raise ProtocolError("Abaqus bridge returned a mismatched response id")
     if not response.get("ok", False):
         error = response.get("error") or {}
         if isinstance(error, dict):
-            raise RuntimeError(error.get("message") or json.dumps(error, ensure_ascii=False))
-        raise RuntimeError(str(error))
-
+            details = {key: value for key, value in error.items() if key not in ("code", "message")}
+            raise RequestError(error.get("code", "BRIDGE_ERROR"), error.get("message", "bridge error"), **details)
+        raise RequestError("BRIDGE_ERROR", str(error))
     result = response.get("result")
     if not isinstance(result, dict):
         raise ProtocolError("Abaqus bridge returned an invalid result envelope")
@@ -238,30 +289,52 @@ async def _bridge_request(
     params: dict[str, Any] | None = None,
     timeout: float | None = None,
     session_id: str | None = None,
+    request_id: str | None = None,
 ) -> dict[str, Any]:
+    # Capture once: active-session changes cannot redirect timeout recovery.
     host, port = _session_manager.resolve_endpoint(session_id)
+    stable_id = request_id if request_id is not None else str(uuid.uuid4())
+    if not isinstance(stable_id, str) or not stable_id.strip() or len(stable_id) > 200:
+        raise ValueError("request_id must be a non-empty string of at most 200 characters")
+    if method == "execute":
+        _remember_endpoint(stable_id, (host, port))
     try:
-        return await asyncio.to_thread(_request, method, params, timeout, host, port)
+        result = await asyncio.to_thread(_request, method, params, timeout, host, port, stable_id)
+    except RequestError:
+        raise
     except ConnectionRefusedError as exc:
-        active = _session_manager.get_active()
-        ep_info = f"{host}:{port}"
-        if active:
-            ep_info += f" (session_id={_session_manager.get_active_id()})"
         raise RuntimeError(
-            "Cannot connect to the Abaqus GUI bridge. Start Abaqus/CAE and run "
-            "Plug-ins > wmw-abaqus-mcp > Start Socket Bridge. "
-            f"Bridge endpoint: {ep_info}. Original error: {exc}"
-        ) from exc
-    except TimeoutError as exc:
-        raise RuntimeError(
-            "Timed out waiting for the Abaqus GUI bridge. Abaqus may be busy or "
-            "the bridge may need to be restarted from the Plug-ins menu. "
+            f"Cannot connect to the Abaqus GUI bridge at {host}:{port} "
+            f"(session_id={session_id or _session_manager.get_active_id() or 'default'}, request_id={stable_id}). "
             f"Original error: {exc}"
         ) from exc
+    except (TimeoutError, OSError, ProtocolError) as exc:
+        if method != "execute":
+            raise RuntimeError(f"Bridge request failed at {host}:{port}: {exc}") from exc
+        # Query ONLY the original operation. Never repeat execute, change target,
+        # unlock the GUI, or recommend a restart to resolve an uncertain outcome.
+        try:
+            status = await asyncio.to_thread(_request, "request_status", {"request_id": stable_id},
+                                             5.0, host, port)
+        except Exception as status_exc:
+            raise RequestError("PENDING", "transport failed; outcome unknown; query status, do not replay",
+                               request_id=stable_id, state="unknown", endpoint=f"{host}:{port}",
+                               status_error=str(status_exc)) from exc
+        if status.get("completed") and isinstance(status.get("result"), dict):
+            result = status["result"]
+        else:
+            state = status.get("state", "unknown")
+            code = "EXPIRED" if state == "expired" else "PENDING"
+            raise RequestError(code, "transport wait ended; query original status, do not replay",
+                               request_id=stable_id, state=state, endpoint=f"{host}:{port}") from exc
+    if method == "execute":
+        result = dict(result, request_id=stable_id)
+    return result
 
 
-async def _exec(code: str, timeout: float | None = None, session_id: str | None = None) -> dict[str, Any]:
-    return await _bridge_request("execute", {"code": code}, timeout, session_id=session_id)
+async def _exec(code: str, timeout: float | None = None, session_id: str | None = None,
+                request_id: str | None = None) -> dict[str, Any]:
+    return await _bridge_request("execute", {"code": code}, timeout, session_id=session_id, request_id=request_id)
 
 
 def _json_string(data: Any) -> str:
@@ -274,6 +347,8 @@ def _format_error_to_markdown(result: dict[str, Any]) -> str:
     error_line = result.get("error_line")
     location = f" at line {error_line}" if error_line else ""
     parts = [f"{error_type}{location}: {core_error}"]
+    if result.get("request_id"):
+        parts.append(f"  request_id: {result['request_id']}")
 
     recovery = result.get("recovery")
     if isinstance(recovery, dict) and recovery:
@@ -390,6 +465,27 @@ async def ping(timeout: float | None = None, session_id: str | None = None) -> d
 
 
 @mcp.tool()
+async def get_request_status(request_id: str, session_id: str | None = None) -> dict[str, Any]:
+    """Read a known operation without executing it again.
+
+    Saved terminal results are bounded and local to the CAE process. Unknown or
+    evicted IDs must not trigger automatic replay. With no session_id, a recent
+    execution's captured endpoint is used even after the active session changes.
+    """
+    if not request_id.strip():
+        raise ValueError("request_id must not be empty")
+    if session_id is not None:
+        endpoint = _session_manager.resolve_endpoint(session_id)
+    elif request_id in _request_endpoints:
+        endpoint = _request_endpoints[request_id]
+        if endpoint is None:
+            raise ValueError("request_id was used on multiple sessions; specify session_id")
+    else:
+        endpoint = _session_manager.resolve_endpoint()
+    return await asyncio.to_thread(_request, "request_status", {"request_id": request_id}, 5.0, *endpoint)
+
+
+@mcp.tool()
 async def check_abaqus_connection(timeout: float | None = None, session_id: str | None = None) -> str:
     """Return a concise human-readable bridge status.
 
@@ -411,7 +507,7 @@ async def check_abaqus_connection(timeout: float | None = None, session_id: str 
 
 
 @mcp.tool()
-async def run_python(code: str, timeout: float | None = None, session_id: str | None = None) -> dict[str, Any]:
+async def run_python(code: str, timeout: float | None = None, session_id: str | None = None, request_id: str | None = None) -> dict[str, Any]:
     """Execute Python code in the active (or specified) Abaqus/CAE kernel.
 
     Single-line expressions are evaluated and returned. Multi-line scripts are
@@ -420,21 +516,23 @@ async def run_python(code: str, timeout: float | None = None, session_id: str | 
     Args:
         code: Python code to execute.
         session_id: Target a specific Abaqus session. If omitted, uses the active session.
+        request_id: Optional stable operation ID. Reuse only for identical code.
     """
     if not code.strip():
         raise ValueError("code must not be empty")
-    return _unwrap_execution_result(await _exec(code, timeout, session_id=session_id))
+    return _unwrap_execution_result(await _exec(code, timeout, session_id=session_id, request_id=request_id))
 
 
 @mcp.tool()
-async def execute_script(script: str, timeout: float | None = None, session_id: str | None = None) -> str:
+async def execute_script(script: str, timeout: float | None = None, session_id: str | None = None, request_id: str | None = None) -> str:
     """Compatibility wrapper around run_python that returns stdout/text.
 
     Args:
         script: Python script to execute.
         session_id: Target a specific Abaqus session. If omitted, uses the active session.
+        request_id: Optional stable operation ID for duplicate detection/status recovery.
     """
-    result = await run_python(script, timeout, session_id=session_id)
+    result = await run_python(script, timeout, session_id=session_id, request_id=request_id)
     stdout = str(result.get("stdout") or "")
     returned = result.get("return_value")
     if returned is not None:
@@ -565,36 +663,49 @@ result = {"jobs": jobs}
 
 
 @mcp.tool()
-async def submit_job(job_name: str, timeout: float | None = None, session_id: str | None = None) -> str:
-    """Submit an existing Abaqus job and wait for completion.
+async def submit_job(job_name: str, timeout: float | None = None, session_id: str | None = None,
+                     request_id: str | None = None) -> str:
+    """Submit an existing job and return an acknowledgement immediately.
 
-    Args:
-        job_name: Name of the job to submit.
-        session_id: Target a specific Abaqus session.
+    Submission is not solver completion. Use monitor_job_status separately.
+    request_id is an optional stable ID for this particular submission operation.
     """
     if not job_name.strip():
         raise ValueError("job_name must not be empty")
     code = r"""
+import os
+import weakref
 from abaqus import mdb
 
 job_name = __JOB_NAME__
 if job_name not in mdb.jobs:
     raise KeyError("Job not found: " + job_name)
 job = mdb.jobs[job_name]
+workdir = os.path.abspath(os.getcwd())
 job.submit(consistencyChecking=False)
-job.waitForCompletion()
-result = {"success": True, "job": job_name, "status": str(getattr(job, "status", "UNKNOWN"))}
+# No strong references to old databases/jobs are kept in this bounded cache.
+try:
+    mdb_ref, job_ref = weakref.ref(mdb), weakref.ref(job)
+    identity_error = None
+except Exception as exc:
+    mdb_ref, job_ref = None, None
+    identity_error = "identity_unavailable: " + str(exc)
+submission_records = globals().setdefault("_ABAQUS_MCP_JOB_WORKDIRS", {})
+submission_records.pop(job_name, None)
+while len(submission_records) >= 128:
+    del submission_records[next(iter(submission_records))]
+submission_records[job_name] = {"workdir": workdir, "mdb_ref": mdb_ref, "job_ref": job_ref, "identity_error": identity_error}
+result = {"submitted": True, "job": job_name, "status": str(getattr(job, "status", "UNKNOWN")), "workdir": workdir}
 """.replace("__JOB_NAME__", json.dumps(job_name.strip()))
-    return _json_string((await run_python(code, timeout or 3600.0, session_id=session_id)).get("return_value"))
+    return _json_string((await run_python(code, timeout, session_id=session_id, request_id=request_id)).get("return_value"))
 
 
 @mcp.tool()
 async def monitor_job_status(job_name: str = "", timeout: float | None = None, session_id: str | None = None) -> dict[str, Any]:
-    """Inspect job objects and, when a job is named, tail .sta/.msg diagnostics.
+    """Read actual job.status and bounded log tails; never control the solver.
 
-    Args:
-        job_name: Job to inspect (empty = list all jobs).
-        session_id: Target a specific Abaqus session.
+    Named jobs use the absolute directory captured by submit_job when available.
+    Missing jobs/files and read failures are explicit; logs are not proof of exit.
     """
     code = r"""
 import os
@@ -602,26 +713,25 @@ import re
 from abaqus import mdb
 
 job_name = __JOB_NAME__
+MAX_TAIL_BYTES = 128 * 1024
+file_errors = {}
 
-def _tail_lines(path, count):
+def _bounded_tail(path, key):
     try:
-        with open(path, "r") as handle:
-            lines = handle.read().splitlines()
-        return lines[-count:]
-    except Exception:
-        return []
-
-def _grep_tail(path, patterns, limit):
-    try:
-        rx = re.compile("|".join(patterns))
-        matches = []
-        with open(path, "r") as handle:
-            for line in handle:
-                if rx.search(line):
-                    matches.append(line.rstrip())
-        return matches[-limit:]
-    except Exception:
-        return []
+        with open(path, "rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            offset = max(0, size - MAX_TAIL_BYTES)
+            handle.seek(offset)
+            lines = handle.read(MAX_TAIL_BYTES).decode("utf-8", errors="replace").splitlines()
+        if offset and lines:
+            lines = lines[1:]
+        return lines
+    except FileNotFoundError as exc:
+        file_errors[key] = "missing: " + str(exc)
+    except Exception as exc:
+        file_errors[key] = "read failed: " + str(exc)
+    return []
 
 if not job_name:
     jobs = []
@@ -633,21 +743,54 @@ if not job_name:
                 value = getattr(job, attr, None)
                 if value is not None:
                     item[attr] = str(value)
-            except Exception:
-                pass
+            except Exception as exc:
+                item[attr + "_error"] = str(exc)
         jobs.append(item)
-    result = {"jobs": jobs, "workdir": os.getcwd()}
+    result = {"jobs": jobs, "workdir": os.path.abspath(os.getcwd())}
 else:
-    sta_path = os.path.join(os.getcwd(), job_name + ".sta")
-    msg_path = os.path.join(os.getcwd(), job_name + ".msg")
+    found = job_name in mdb.jobs
+    current_job = mdb.jobs[job_name] if found else None
+    submission_record = globals().get("_ABAQUS_MCP_JOB_WORKDIRS", {}).get(job_name)
+    saved_workdir = None
+    workdir_fallback_reason = "no_confirmed_submission"
+    if submission_record is not None:
+        if not isinstance(submission_record, dict):
+            workdir_fallback_reason = "legacy_submission_identity_unavailable"
+        elif submission_record.get("identity_error") or not callable(submission_record.get("mdb_ref")) or not callable(submission_record.get("job_ref")):
+            workdir_fallback_reason = "submission_identity_unavailable"
+        elif submission_record["mdb_ref"]() is not mdb:
+            workdir_fallback_reason = "mdb_identity_changed"
+        elif submission_record["job_ref"]() is not current_job or current_job is None:
+            workdir_fallback_reason = "job_identity_changed"
+        else:
+            saved_workdir = submission_record.get("workdir")
+    workdir = saved_workdir or os.path.abspath(os.getcwd())
+    sta_path = os.path.join(workdir, job_name + ".sta")
+    msg_path = os.path.join(workdir, job_name + ".msg")
+    status = None
+    status_error = None
+    if found:
+        try:
+            status = str(current_job.status)
+        except Exception as exc:
+            status_error = "job.status read failed: " + str(exc)
+    progress = _bounded_tail(sta_path, "sta")
+    messages = _bounded_tail(msg_path, "msg")
+    rx = re.compile(r"^\*\*\*(ERROR|WARNING)")
     result = {
-        "job_name": job_name,
-        "workdir": os.getcwd(),
-        "sta_path": sta_path,
-        "msg_path": msg_path,
-        "progress_tail": _tail_lines(sta_path, 8),
-        "diagnostics_tail": _grep_tail(msg_path, [r"^\*\*\*ERROR", r"^\*\*\*WARNING"], 12),
+        "job_name": job_name, "job_found": found, "status": status,
+        "workdir": workdir, "workdir_source": "submission" if saved_workdir else "current_directory_fallback",
+        "sta_path": sta_path, "msg_path": msg_path,
+        "progress_tail": progress[-8:],
+        "diagnostics_tail": [line for line in messages if rx.search(line)][-12:],
+        "file_errors": file_errors, "tail_max_bytes": MAX_TAIL_BYTES,
     }
+    if not found:
+        result["error"] = "Job not found: " + job_name
+    if not saved_workdir:
+        result["workdir_fallback_reason"] = workdir_fallback_reason
+    if status_error:
+        result["status_error"] = status_error
 """.replace("__JOB_NAME__", json.dumps(job_name.strip()))
     return (await run_python(code, timeout, session_id=session_id)).get("return_value")
 

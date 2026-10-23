@@ -1,13 +1,13 @@
 # wmw-abaqus-mcp
 
-**v5.2.0 · Abaqus/CAE 多端口、多窗口 MCP 插件**
+**v6.0.0 源码候选版 · Abaqus/CAE 多会话执行控制**
 
 [English](README.en.md) · [版本记录](CHANGELOG.md) · [验证范围](docs/validation.md) · [本地排版版](docs/site/index.html)
 
 把 MCP 客户端连接到正在运行的 **Abaqus/CAE**。每个 CAE 窗口使用独立 TCP 端口，默认范围为 **48152–48162**；一个 MCP server 可发现多个窗口、切换活动会话，并通过 **`session_id`** 定向执行。
 
 > [!IMPORTANT]
-> 本仓库来自当前使用的 **v5.2.0** 源码，名称统一为 **wmw-abaqus-mcp**。保留原工具名、`ABAQUS_MCP_*` 环境变量和通信协议。本次同步不改变建模或求解逻辑。
+> 本版修改请求生命周期及作业提交语义，**仅同步源码，尚未发行正式 Release，尚未通过真实 CAE 集成验收**。升级需同时使用本版桥接端和 MCP server；现有 CAE 会话不热替换、不自动重启。`submit_job` 现在只提交并返回，后续使用独立监测判断完成。
 
 ## 功能
 
@@ -19,9 +19,43 @@
 
 每个窗口内的请求受该 CAE GUI/kernel 状态约束；多端口不代表同一窗口可并行执行多个内核脚本。
 
+## 本次执行控制修复
+
+- **每个窗口只准入一个操作**：不同请求收到 `BUSY`，不会继续堆积执行队列。多个 MCP 客户端共用桥接端的状态。
+- **短回调检查结果**：每次 GUI 回调最多派发一次或检查一次响应，移除插件内的循环等待；派发前占位，防止事件重入重复执行。
+- **超时后核实原操作**：已派发操作进入 `timeout_pending`，保持占位；超时不会停止脚本或求解，也不会触发自动重发。
+- **请求编号可查询**：`run_python`、`execute_script`、`submit_job` 可传入稳定的 `request_id`；新增 `get_request_status`。同编号、同内容复用原记录；同编号、不同内容拒绝。
+- **提交与监测分离**：`submit_job` 返回提交状态和工作目录，`monitor_job_status` 独立报告作业实际状态；提交回执不代表分析成功。
+
+提交目录记录最多保留 128 条，并以 MDB 和作业对象的弱引用核对身份。同名对象被替换、对象不支持弱引用或记录不可用时，监测明确返回 `current_directory_fallback` 及原因。**真实 Abaqus 对象的弱引用与身份行为尚未实测**；出现回退时应核对返回的绝对目录，不能把同名日志视为已确认属于当前作业。
+
+| 状态 | 含义与处理 |
+|---|---|
+| `queued` | 已准入、尚未派发；超过排队期限不再启动 |
+| `running` | 已派发；等待真实回执 |
+| `timeout_pending` | 等待超时，执行结果仍待核实；不得据此重发 |
+| `completed` / `failed` | 已取得执行完成回执；保存结果或错误 |
+| `expired` | 尚未派发即过期，不执行 |
+| `unknown` | 未找到可恢复记录；不等于没有执行过，不自动重放 |
+
+以下为 **MCP 工具请求示例**，不是 CAE 命令区脚本。遇到超时先保留请求编号，然后查询同一会话：
+
+```json
+{"name":"run_python","arguments":{"code":"list(mdb.models.keys())","session_id":"session_48153","request_id":"read-models-20261023-01"}}
+{"name":"get_request_status","arguments":{"request_id":"read-models-20261023-01","session_id":"session_48153"}}
+```
+
+状态保存在桥接进程内，不能在关闭 CAE 后恢复。终态结果最多保留 **128 条、总计 16 MiB**，去重信息默认保留 **65536 个请求编号**（初始化时可用 `ABAQUS_MCP_ID_HISTORY_LIMIT` 配置）。结果已回收的旧编号返回 `HISTORY_EVICTED`，仍不能重放；去重容量耗尽返回 `HISTORY_CAPACITY`，不会自动清空记录或重启 CAE。
+
+`ping` 用于检查桥接存活与忙碌状态，**连接成功不等于内核空闲**；模型列表使用 `get_model_info` 查询。请求状态的 `completed` 指 Python 操作已有回执，**不是求解器已经完成分析**。
+
+**原生调用边界**：`sendCommand()` 仍在 GUI 线程调用。此修复移除插件自身的等待循环，不能保证 Abaqus 原生调用、大模型重生成或显示更新永远不占用 GUI；不将 Abaqus API 移到缺少线程安全保证的后台线程。
+
 ## 安装
 
 需要可用的 **Abaqus/CAE 许可证**和外部 **Python 3.10+**。无需在 CAE Python 中安装 MCP。兼容性范围见[验证记录](docs/validation.md)。
+
+将仓库克隆到独立目录，再从仓库根目录安装。**当前为源码候选版。** 现有会话与后续迁移安排见 [安装与验收](docs/upgrade.md)。
 
 ```powershell
 git clone https://github.com/Flyme-wang/wmw-abaqus-mcp.git
@@ -83,7 +117,7 @@ Plug-ins > wmw-abaqus-mcp > Stop Socket Bridge
 
 ## 工具与资源
 
-**会话工具**：`discover_sessions`、`list_sessions`、`set_active_session`。
+**会话工具**：`discover_sessions`、`list_sessions`、`set_active_session`。**请求状态工具**：`get_request_status`。
 
 **CAE 工具**：`ping`、`check_abaqus_connection`、`run_python`、`execute_script`、`set_workdir`、`get_model_info`、`list_jobs`、`submit_job`、`monitor_job_status`、`inspect_odb`、`get_odb_info`、`capture_viewport`、`get_viewport_image`。以上工具均支持可选 `session_id`。
 

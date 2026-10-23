@@ -1,27 +1,33 @@
-# v5.2.0 验证记录
+# v6.0.0 源码候选版验证记录
 
-**日期：2026-10-15；范围：独立公开发布副本。**
+**日期：2026-10-23；状态：源码候选版，仅同步 GitHub 源码，未创建正式 Release，未安装到现有 CAE。**
 
-原在用桥接的版本常量为 **5.2.0**。本次同步保留通信及求解逻辑，只统一项目标识、GUI 菜单和包版本，更新可移植配置、文档及验证材料。
+本版按用户确认的四项需求改动：单会话单执行、GUI 短回调、请求状态与超时核实、提交和完成监测分离。由于 `submit_job` 的完成语义发生变化，主版本升级到 6.0.0。
 
-## 检查项目
+## 验证方法
 
-| 项目 | 实际结果 |
+- 使用真实标准库请求注册表，验证并发准入、稳定编号去重、排队过期、执行超时保留占位和真实回执释放。
+- GUI 适配器只替换 Abaqus 原生边界；检查单次派发、回调重入、后续 tick 回收结果、停止接收时不丢失在途操作。
+- 网络集成只使用系统分配端口上的独立假桥接，保护测试不能连接已有 CAE 端点。
+- MCP 超时恢复只允许查询原请求状态；测试固定端点、晚到结果、未知结果和禁止重复 execute。
+- 作业使用假对象，确认只调用提交、不等待整个求解；具名监测返回实际状态和读取错误。未提交真实计算。
+- 菜单加载器和启动钩子均有搜索路径回归测试，确认新 `bridge_runtime.py` 可由源码目录导入。
+- 原有 8 项端口/路由基线保留。历史发布记录见 [5.2.0 验证](validation-5.2.0.md)。
+
+## 本轮实测结果
+
+| 检查项 | 本轮结果 |
 |---|---|
-| Python 语法、JSON、TOML | 通过；版本元数据为 5.2.0，TOML 无 BOM |
-| 多端口与会话路由 | **8 项 unittest 通过**；两个 OS 分配端口的 fake TCP bridge，禁止连接其他端点 |
-| 端口选择 | 自动选择首个可用端口；显式端口成功、占用错误；范围耗尽错误 |
-| MCP stdio | initialize、tools/list、resources/list 通过；名称 wmw-abaqus-mcp，**16 tools、4 resources**，未发出 CAE bridge 请求 |
-| 工具参数 | 13 个 CAE 工具均包含可选 session_id |
-| Python 打包 | wheel 构建、隔离 target 安装/import、editable target 安装通过 |
-| 源码追溯 | 发布 Python 文件与 source-manifest.json 的 SHA-256 匹配；核心代码 diff 仅为声明的名称/菜单/说明字符串 |
-| 公开文件 | allowlist 与敏感模式扫描通过，排除环境、缓存、模型、日志和结果 |
-| 本地 HTML | 5 页；本地链接/片段有效，代码可见文本与源 Markdown 保持一致；安装/操作文档 12 个代码块实际复制通过（按 Windows 换行规则核对） |
-| 字体与布局 | Chromium 在 1440 / 390 px 预览；CDP 实测中文 Microsoft YaHei、英文 Times New Roman，无页面横向溢出或标题裁切 |
+| 离线回归测试 | **64 项通过**；包含原有 8 项、加载器 2 项及本次执行控制回归 |
+| MCP stdio 工具与资源发现 | **17 tools、4 resources、0 bridge calls**；initialize 与 schema 检查通过 |
+| wheel 构建与隔离导入 | **通过**；隔离 target 安装为 6.0.0，包含 bridge_runtime；未导入真实 Abaqus |
+| 本地 HTML 与字体预览 | **通过**；1440 / 390 px 无页面横向溢出；CDP 实测 Microsoft YaHei / Times New Roman |
+| 真实 CAE / 大文件卡顿 | **未验证** |
+| 真实模型与求解器 | **未运行** |
 
-测试环境：**Windows、CPython 3.12.10、MCP SDK 1.27.2**。打包时依赖按 pyproject.toml 解析；没有将 `mcp>=1.0` 的所有版本都表述为已验证。
+复核命令使用外部 Python：
 
-复核命令（使用已安装依赖的外部 Python）：
+测试环境：Windows、CPython **3.12.10**、MCP SDK **1.27.2**；另用 Python 3.10 语法规则检查所有运行模块。语法兼容检查不能替代实际 Abaqus 2024 GUI 集成验证。
 
 ```powershell
 python -B -m unittest discover -s tests -v
@@ -30,12 +36,16 @@ python -m pip wheel --no-deps --wheel-dir .qa/wheels .
 python scripts/build_publication.py
 ```
 
-## 适用范围
+## 原生 API 和部署边界
 
-**隔离测试使用 fake TCP JSON endpoints，不连接正在运行的 CAE。** 本次发布不重新启动 CAE、不修改现有模型、不提交求解器作业。
+`sendCommand` 仍通过 GUI 线程进入 Abaqus 内核。本版移除插件自身的循环等待，不使用未公开的异步参数或任意后台线程调用 Abaqus API。原生调用内部耗时及是否释放 GIL 尚未实测，因此旁路状态查询“不进入 GUI 队列”不等于任何情况下网络线程都能立即回应。
 
-没有将离线检查或模型作业完成视为科学模型验收。未验证其他 Abaqus 版本、Linux/macOS GUI、远程网络部署或所有 ODB/截图工作流。`abaqus://status` 与 `abaqus://session-telemetry` 的默认端点限制保留并在 README 明示。
+超时或暂时读不到响应时，已派发操作仍被跟踪，不释放占位、不重发、不自动终止。只有真实完成回执能确认结果。未知或已回收的记录不能作为安全重放的依据。历史结果和去重信息有上限，活动操作不被回收；容量耗尽会明确报错，不通过自动重启清空状态。
 
-## 源码追溯
+本地开发不覆盖原工作目录或插件缓存，不改本机环境变量和 MCP 配置，不热加载、不关闭现有 CAE 或求解器。后续迁移步骤见 [安装与验收](upgrade.md)。
 
-[source-manifest.json](source-manifest.json) 保存原始主插件、server、停止脚本与 loader 的 SHA-256；发布副本仅做声明的品牌修改。发布 ZIP 另附 SHA256SUMS。
+作业目录仅在成功提交后更新，并以最多 128 条 MDB/Job 弱引用记录校验。真实 Abaqus 对象若不支持弱引用或代理身份变化，监测明确回退当前目录并报告原因；该实际兼容性尚未验证。已离线覆盖提交被拒后保留旧目录、同名作业替换、MDB 替换及弱引用不支持四种边界。
+
+## 来源指纹
+
+[source-manifest.json](source-manifest.json) 保留上游原始 SHA-256 和 5.2.0 发布指纹，并记录本候选版的改动指纹。版本号与离线测试通过均不构成真实 CAE 或科学模型验收。

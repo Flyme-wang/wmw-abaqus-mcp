@@ -1,12 +1,12 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>wmw-abaqus-mcp</title><link rel="stylesheet" href="../assets/publication.css"></head>
-<body><div class="layout"><nav aria-label="Documentation"><div class="brand latin">wmw-abaqus-mcp<br><span class="version">v5.2.0</span></div><a class="active" aria-current="page" href="index.html"><span class="han">中文说明</span></a><a href="english.html">English</a><a href="changelog.html"><span class="han">版本记录</span> / Changelog</a><a href="validation.html"><span class="han">验证范围</span> / Validation</a><a href="publication-style.html"><span class="han">排版</span> / Typography</a></nav>
+<body><div class="layout"><nav aria-label="Documentation"><div class="brand latin">wmw-abaqus-mcp<br><span class="version">v6.0.0</span></div><a class="active" aria-current="page" href="index.html"><span class="han">中文说明</span></a><a href="english.html">English</a><a href="changelog.html"><span class="han">版本记录</span> / Changelog</a><a href="validation.html"><span class="han">验证范围</span> / Validation</a><a href="publication-style.html"><span class="han">排版</span> / Typography</a></nav>
 <main><div class="font-samples"><span id="font-zh-sample" class="han">中文：微软雅黑</span> · <span id="font-en-sample" class="latin">English: Times New Roman</span></div><h1 id="wmw-abaqus-mcp">wmw-abaqus-mcp</h1>
-<p><strong>v5.2.0 · Abaqus/CAE <span class="han">多端口、多窗口</span> MCP <span class="han">插件</span></strong></p>
+<p><strong>v6.0.0 <span class="han">源码候选版</span> · Abaqus/CAE <span class="han">多会话执行控制</span></strong></p>
 <p><a href="english.html">English</a> · <a href="changelog.html"><span class="han">版本记录</span></a> · <a href="validation.html"><span class="han">验证范围</span></a> · <a href="index.html"><span class="han">本地排版版</span></a></p>
 <p><span class="han">把</span> MCP <span class="han">客户端连接到正在运行的</span> <strong>Abaqus/CAE</strong><span class="han">。每个</span> CAE <span class="han">窗口使用独立</span> TCP <span class="han">端口，默认范围为</span> <strong>48152–48162</strong><span class="han">；一个</span> MCP server <span class="han">可发现多个窗口、切换活动会话，并通过</span> <strong><code>session_id</code></strong> <span class="han">定向执行。</span></p>
-<blockquote class="callout important"><p><span class="callout-label"><span class="han">关键要求</span></span><span class="han">本仓库来自当前使用的</span> <strong>v5.2.0</strong> <span class="han">源码，名称统一为</span> <strong>wmw-abaqus-mcp</strong><span class="han">。保留原工具名、</span><code>ABAQUS_MCP_*</code> <span class="han">环境变量和通信协议。本次同步不改变建模或求解逻辑。</span></p>
+<blockquote class="callout important"><p><span class="callout-label"><span class="han">关键要求</span></span><span class="han">本版修改请求生命周期及作业提交语义，</span><strong><span class="han">仅同步源码，尚未发行正式</span> Release<span class="han">，尚未通过真实</span> CAE <span class="han">集成验收</span></strong><span class="han">。升级需同时使用本版桥接端和</span> MCP server<span class="han">；现有</span> CAE <span class="han">会话不热替换、不自动重启。</span><code>submit_job</code> <span class="han">现在只提交并返回，后续使用独立监测判断完成。</span></p>
 </blockquote>
 <h2 id="功能"><span class="han">功能</span></h2>
 <ul>
@@ -17,8 +17,59 @@
 <li><strong><span class="han">本地桥接</span></strong><span class="han">：外部</span> MCP server <span class="han">通过</span> stdio <span class="han">提供工具；</span>GUI <span class="han">线程调度，再经</span> <code>sendCommand</code> <span class="han">进入</span> Abaqus kernel<span class="han">。</span></li>
 </ul>
 <p><span class="han">每个窗口内的请求受该</span> CAE GUI/kernel <span class="han">状态约束；多端口不代表同一窗口可并行执行多个内核脚本。</span></p>
+<h2 id="本次执行控制修复"><span class="han">本次执行控制修复</span></h2>
+<ul>
+<li><strong><span class="han">每个窗口只准入一个操作</span></strong><span class="han">：不同请求收到</span> <code>BUSY</code><span class="han">，不会继续堆积执行队列。多个</span> MCP <span class="han">客户端共用桥接端的状态。</span></li>
+<li><strong><span class="han">短回调检查结果</span></strong><span class="han">：每次</span> GUI <span class="han">回调最多派发一次或检查一次响应，移除插件内的循环等待；派发前占位，防止事件重入重复执行。</span></li>
+<li><strong><span class="han">超时后核实原操作</span></strong><span class="han">：已派发操作进入</span> <code>timeout_pending</code><span class="han">，保持占位；超时不会停止脚本或求解，也不会触发自动重发。</span></li>
+<li><strong><span class="han">请求编号可查询</span></strong><span class="han">：</span><code>run_python</code><span class="han">、</span><code>execute_script</code><span class="han">、</span><code>submit_job</code> <span class="han">可传入稳定的</span> <code>request_id</code><span class="han">；新增</span> <code>get_request_status</code><span class="han">。同编号、同内容复用原记录；同编号、不同内容拒绝。</span></li>
+<li><strong><span class="han">提交与监测分离</span></strong><span class="han">：</span><code>submit_job</code> <span class="han">返回提交状态和工作目录，</span><code>monitor_job_status</code> <span class="han">独立报告作业实际状态；提交回执不代表分析成功。</span></li>
+</ul>
+<p><span class="han">提交目录记录最多保留</span> 128 <span class="han">条，并以</span> MDB <span class="han">和作业对象的弱引用核对身份。同名对象被替换、对象不支持弱引用或记录不可用时，监测明确返回</span> <code>current_directory_fallback</code> <span class="han">及原因。</span><strong><span class="han">真实</span> Abaqus <span class="han">对象的弱引用与身份行为尚未实测</span></strong><span class="han">；出现回退时应核对返回的绝对目录，不能把同名日志视为已确认属于当前作业。</span></p>
+<table>
+<thead>
+<tr>
+  <th><span class="han">状态</span></th>
+  <th><span class="han">含义与处理</span></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td><code>queued</code></td>
+  <td><span class="han">已准入、尚未派发；超过排队期限不再启动</span></td>
+</tr>
+<tr>
+  <td><code>running</code></td>
+  <td><span class="han">已派发；等待真实回执</span></td>
+</tr>
+<tr>
+  <td><code>timeout_pending</code></td>
+  <td><span class="han">等待超时，执行结果仍待核实；不得据此重发</span></td>
+</tr>
+<tr>
+  <td><code>completed</code> / <code>failed</code></td>
+  <td><span class="han">已取得执行完成回执；保存结果或错误</span></td>
+</tr>
+<tr>
+  <td><code>expired</code></td>
+  <td><span class="han">尚未派发即过期，不执行</span></td>
+</tr>
+<tr>
+  <td><code>unknown</code></td>
+  <td><span class="han">未找到可恢复记录；不等于没有执行过，不自动重放</span></td>
+</tr>
+</tbody>
+</table>
+<p><span class="han">以下为</span> <strong>MCP <span class="han">工具请求示例</span></strong><span class="han">，不是</span> CAE <span class="han">命令区脚本。遇到超时先保留请求编号，然后查询同一会话：</span></p>
+<pre><code class="language-json">{&quot;name&quot;:&quot;run_python&quot;,&quot;arguments&quot;:{&quot;code&quot;:&quot;list(mdb.models.keys())&quot;,&quot;session_id&quot;:&quot;session_48153&quot;,&quot;request_id&quot;:&quot;read-models-20261023-01&quot;}}
+{&quot;name&quot;:&quot;get_request_status&quot;,&quot;arguments&quot;:{&quot;request_id&quot;:&quot;read-models-20261023-01&quot;,&quot;session_id&quot;:&quot;session_48153&quot;}}
+</code></pre>
+<p><span class="han">状态保存在桥接进程内，不能在关闭</span> CAE <span class="han">后恢复。终态结果最多保留</span> <strong>128 <span class="han">条、总计</span> 16 MiB</strong><span class="han">，去重信息默认保留</span> <strong>65536 <span class="han">个请求编号</span></strong><span class="han">（初始化时可用</span> <code>ABAQUS_MCP_ID_HISTORY_LIMIT</code> <span class="han">配置）。结果已回收的旧编号返回</span> <code>HISTORY_EVICTED</code><span class="han">，仍不能重放；去重容量耗尽返回</span> <code>HISTORY_CAPACITY</code><span class="han">，不会自动清空记录或重启</span> CAE<span class="han">。</span></p>
+<p><code>ping</code> <span class="han">用于检查桥接存活与忙碌状态，</span><strong><span class="han">连接成功不等于内核空闲</span></strong><span class="han">；模型列表使用</span> <code>get_model_info</code> <span class="han">查询。请求状态的</span> <code>completed</code> <span class="han">指</span> Python <span class="han">操作已有回执，</span><strong><span class="han">不是求解器已经完成分析</span></strong><span class="han">。</span></p>
+<p><strong><span class="han">原生调用边界</span></strong><span class="han">：</span><code>sendCommand()</code> <span class="han">仍在</span> GUI <span class="han">线程调用。此修复移除插件自身的等待循环，不能保证</span> Abaqus <span class="han">原生调用、大模型重生成或显示更新永远不占用</span> GUI<span class="han">；不将</span> Abaqus API <span class="han">移到缺少线程安全保证的后台线程。</span></p>
 <h2 id="安装"><span class="han">安装</span></h2>
 <p><span class="han">需要可用的</span> <strong>Abaqus/CAE <span class="han">许可证</span></strong><span class="han">和外部</span> <strong>Python 3.10+</strong><span class="han">。无需在</span> CAE Python <span class="han">中安装</span> MCP<span class="han">。兼容性范围见</span><a href="validation.html"><span class="han">验证记录</span></a><span class="han">。</span></p>
+<p><span class="han">将仓库克隆到独立目录，再从仓库根目录安装。</span><strong><span class="han">当前为源码候选版。</span></strong> <span class="han">现有会话与后续迁移安排见</span> <a href="../upgrade.md"><span class="han">安装与验收</span></a><span class="han">。</span></p>
 <pre><code class="language-powershell">git clone https://github.com/Flyme-wang/wmw-abaqus-mcp.git
 cd wmw-abaqus-mcp
 py -m venv .venv
@@ -62,7 +113,7 @@ Plug-ins &gt; wmw-abaqus-mcp &gt; Stop Socket Bridge
 </code></pre>
 <p><strong><span class="han">未登记活动会话时，工具回退到</span> <code>ABAQUS_MCP_PORT</code><span class="han">，默认</span> 48152<span class="han">。</span></strong> <span class="han">选择</span> Port 48154 <span class="han">后直接调用无参数</span> <code>ping</code><span class="han">，不保证连接该窗口。</span><code>list_sessions</code> <span class="han">只列登记缓存，不扫描或自动清理失效项。</span></p>
 <h2 id="工具与资源"><span class="han">工具与资源</span></h2>
-<p><strong><span class="han">会话工具</span></strong><span class="han">：</span><code>discover_sessions</code><span class="han">、</span><code>list_sessions</code><span class="han">、</span><code>set_active_session</code><span class="han">。</span></p>
+<p><strong><span class="han">会话工具</span></strong><span class="han">：</span><code>discover_sessions</code><span class="han">、</span><code>list_sessions</code><span class="han">、</span><code>set_active_session</code><span class="han">。</span><strong><span class="han">请求状态工具</span></strong><span class="han">：</span><code>get_request_status</code><span class="han">。</span></p>
 <p><strong>CAE <span class="han">工具</span></strong><span class="han">：</span><code>ping</code><span class="han">、</span><code>check_abaqus_connection</code><span class="han">、</span><code>run_python</code><span class="han">、</span><code>execute_script</code><span class="han">、</span><code>set_workdir</code><span class="han">、</span><code>get_model_info</code><span class="han">、</span><code>list_jobs</code><span class="han">、</span><code>submit_job</code><span class="han">、</span><code>monitor_job_status</code><span class="han">、</span><code>inspect_odb</code><span class="han">、</span><code>get_odb_info</code><span class="han">、</span><code>capture_viewport</code><span class="han">、</span><code>get_viewport_image</code><span class="han">。以上工具均支持可选</span> <code>session_id</code><span class="han">。</span></p>
 <table>
 <thead>

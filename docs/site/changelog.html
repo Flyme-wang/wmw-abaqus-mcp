@@ -1,8 +1,19 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CHANGELOG</title><link rel="stylesheet" href="../assets/publication.css"></head>
-<body><div class="layout"><nav aria-label="Documentation"><div class="brand latin">wmw-abaqus-mcp<br><span class="version">v5.2.0</span></div><a href="index.html"><span class="han">中文说明</span></a><a href="english.html">English</a><a class="active" aria-current="page" href="changelog.html"><span class="han">版本记录</span> / Changelog</a><a href="validation.html"><span class="han">验证范围</span> / Validation</a><a href="publication-style.html"><span class="han">排版</span> / Typography</a></nav>
+<body><div class="layout"><nav aria-label="Documentation"><div class="brand latin">wmw-abaqus-mcp<br><span class="version">v6.0.0</span></div><a href="index.html"><span class="han">中文说明</span></a><a href="english.html">English</a><a class="active" aria-current="page" href="changelog.html"><span class="han">版本记录</span> / Changelog</a><a href="validation.html"><span class="han">验证范围</span> / Validation</a><a href="publication-style.html"><span class="han">排版</span> / Typography</a></nav>
 <main><div class="font-samples"><span id="font-zh-sample" class="han">中文：微软雅黑</span> · <span id="font-en-sample" class="latin">English: Times New Roman</span></div><h1 id="changelog">CHANGELOG</h1>
+<h2 id="600--2026-10-23源码候选版未正式发行">6.0.0 — 2026-10-23<span class="han">（源码候选版，未正式发行）</span></h2>
+<p><strong><span class="han">本次更新</span></strong></p>
+<ul>
+<li><span class="han">桥接端统一控制每个</span> CAE <span class="han">会话的单个在途操作；忙碌请求明确返回，避免继续积压。</span></li>
+<li>GUI <span class="han">回调移除循环等待与连续批量执行，派发前登记活动状态，结果以原子文件回执收集。</span></li>
+<li><span class="han">新增请求状态追踪与查询；未派发请求过期不执行，已派发超时保持占位，不自动重放或终止计算。</span></li>
+<li>MCP <span class="han">工具支持稳定请求编号；超时后查询原请求结果，不再把网络超时视为脚本已停止。</span></li>
+<li><strong><span class="han">不兼容变化</span></strong><span class="han">：</span><code>submit_job</code> <span class="han">仅提交并立即返回；完成状态改由独立监测查询，因此升级主版本。</span></li>
+<li><span class="han">同步安装元数据与本地中英文说明；实际验证范围见</span> <a href="validation.html"><span class="han">验证记录</span></a><span class="han">。</span></li>
+</ul>
+<p><strong><span class="han">部署说明</span></strong><span class="han">：本次按用户授权同步</span> GitHub <span class="han">源码，未创建正式</span> Release<span class="han">。离线测试不等于真实</span> CAE <span class="han">验收；本次不热改在用源码、不重启</span> CAE<span class="han">、不修改模型或求解参数。</span></p>
 <h2 id="520--2026-10-15">5.2.0 — 2026-10-15</h2>
 <p><strong><span class="han">本次更新</span></strong></p>
 <ul>

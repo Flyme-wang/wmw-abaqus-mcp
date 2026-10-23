@@ -1,16 +1,30 @@
 # wmw-abaqus-mcp
 
-**v5.2.0 · Multi-port, multi-window Abaqus/CAE MCP bridge**
+**v6.0.0 source candidate · Per-session Abaqus/CAE execution control**
 
 [中文](README.md) · [Changelog](CHANGELOG.md) · [Validation](docs/validation.md) · [Local HTML](docs/site/english.html)
 
 Connect an MCP client to one or more live **Abaqus/CAE** windows. Each window binds its own TCP port, normally **48152–48162**. One external MCP server discovers these bridges and routes tools to an active session or an explicit **`session_id`**.
 
-This repository publishes the existing v5.2.0 implementation under **wmw-abaqus-mcp**. Package metadata, MCP server name and GUI menu labels are aligned. Existing tool names, environment variables and wire protocol are preserved. Model and solver logic is unchanged.
+This source candidate changes request lifecycle handling and job-submission semantics. **Only the source is being synchronized; no formal Release has been published, and live CAE integration validation remains outstanding.** Upgrade both the bridge and external MCP server together. Existing CAE sessions are not hot-reloaded or restarted. `submit_job` now returns after submission; use separate monitoring to establish completion.
+
+## Execution control
+
+Each CAE bridge admits one queued/running/outcome-pending operation. Other operation IDs receive `BUSY`. Reusing an ID with identical content refers to the original operation; conflicting content is rejected. GUI ticks dispatch once or check a result once, without a sleep loop. Abaqus APIs remain on their native GUI/kernel execution path.
+
+`run_python`, `execute_script`, and `submit_job` accept an optional stable `request_id`. Use **`get_request_status(request_id, session_id=...)`** after a timeout. States are `queued`, `running`, `timeout_pending`, `completed`, `failed`, `expired`, and `unknown`. An expired queued operation is never dispatched. A dispatched operation remains reserved until its actual outcome is known; a timeout does not stop it or authorize replay. Unknown/evicted history is not proof that execution did not occur.
+
+`submit_job` reports submission and current status, without `waitForCompletion`. Query `monitor_job_status` separately. A completed request is a Python-operation receipt, not a completed solver analysis. Bridge status is process-local; closing CAE loses it. Terminal results are limited to 128 entries and 16 MiB; de-duplication retains 65536 ID hashes by default, configurable at initialization through `ABAQUS_MCP_ID_HISTORY_LIMIT`. Evicted IDs return `HISTORY_EVICTED` and cannot be replayed. Capacity exhaustion returns `HISTORY_CAPACITY`, without resetting history or restarting CAE. `ping` reports transport and busy state, while model metadata is obtained with `get_model_info`.
+
+**Native boundary:** this removes plugin-owned polling waits. The native `sendCommand`, model regeneration, and display operations may still occupy CAE. No supported asynchronous native dispatch or arbitrary worker-thread Abaqus API safety is assumed.
+
+Submission directories retain up to 128 weak-reference identity records. Monitoring reuses one only when both MDB and job objects match. Unsupported weak references, replaced objects, or missing records produce an explicit `current_directory_fallback` and reason. Actual Abaqus wrapper identity/weak-reference behavior has not been validated; verify the returned absolute directory whenever a fallback is reported.
 
 ## Install
 
 Use an external **Python 3.10+** interpreter and a licensed Abaqus/CAE installation. Do not install the MCP SDK into Abaqus Python. See the [validation scope](docs/validation.md) before assuming compatibility with another CAE version.
+
+Clone the repository into a separate directory and install from its root. This is a source candidate; see the [upgrade and acceptance steps](docs/upgrade.md).
 
 ```powershell
 git clone https://github.com/Flyme-wang/wmw-abaqus-mcp.git

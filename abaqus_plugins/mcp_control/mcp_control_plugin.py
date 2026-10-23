@@ -22,7 +22,8 @@ def _resolve_mcp_home():
 
 
 def _load_main_plugin():
-    plugin_path = os.path.join(_resolve_mcp_home(), "abaqus_mcp_plugin.py")
+    plugin_home = os.path.abspath(_resolve_mcp_home())
+    plugin_path = os.path.join(plugin_home, "abaqus_mcp_plugin.py")
     if not os.path.exists(plugin_path):
         print("Abaqus MCP loader could not find: " + plugin_path)
         print("Set ABAQUS_MCP_HOME to the folder containing abaqus_mcp_plugin.py.")
@@ -32,7 +33,9 @@ def _load_main_plugin():
         import __main__
         if getattr(__main__, "_ABAQUS_MCP_MENU_REGISTERED", False):
             return
-        with open(plugin_path, "r") as handle:
+        if plugin_home not in sys.path:
+            sys.path.insert(0, plugin_home)
+        with open(plugin_path, "r", encoding="utf-8") as handle:
             code = handle.read()
         exec(compile(code, plugin_path, "exec"), __main__.__dict__)
     except Exception:

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-wmw-abaqus-mcp v5.2.0 - socket GUI bridge with multi-instance support.
+wmw-abaqus-mcp v6.0.0 - socket GUI bridge with single-flight control.
 
 This file runs inside Abaqus/CAE. It registers a Plug-ins menu, starts a local
 TCP server, dispatches requests on the Abaqus GUI thread, and executes Python in
@@ -18,10 +18,6 @@ import json
 import os
 import platform
 try:
-    import queue
-except ImportError:
-    import Queue as queue
-try:
     import socketserver
 except ImportError:
     import SocketServer as socketserver
@@ -32,6 +28,21 @@ import threading
 import time
 import traceback
 import uuid
+
+try:
+    from bridge_runtime import BridgeError, get_process_registry, positive_timeout
+except ImportError:
+    # File > Run Script may execute source without adding its home to sys.path.
+    # Environment home wins; exec-based loaders need not provide our __file__.
+    _runtime_homes = [os.environ.get("ABAQUS_MCP_HOME")]
+    if globals().get("__file__"):
+        _runtime_homes.append(os.path.dirname(os.path.abspath(__file__)))
+    for _runtime_home in _runtime_homes:
+        if _runtime_home and os.path.isfile(os.path.join(_runtime_home, "bridge_runtime.py")):
+            if _runtime_home not in sys.path:
+                sys.path.insert(0, _runtime_home)
+            break
+    from bridge_runtime import BridgeError, get_process_registry, positive_timeout
 
 from abaqusGui import (
     AFXForm,
@@ -44,7 +55,7 @@ from abaqusGui import (
     showAFXErrorDialog,
 )
 
-__version__ = "5.2.0"
+__version__ = "6.0.0"
 
 HOST = os.environ.get("ABAQUS_MCP_HOST", "127.0.0.1")
 DEFAULT_PORT = int(os.environ.get("ABAQUS_MCP_PORT", "48152"))
@@ -144,23 +155,31 @@ def _send(sock, payload):
     sock.sendall(data + b"\n")
 
 
-def _recv(sock):
+def _recv(sock, io_timeout=10.0):
     chunks = []
     total = 0
     max_bytes = int(os.environ.get("ABAQUS_MCP_MAX_MESSAGE_BYTES", str(32 * 1024 * 1024)))
+    deadline = time.monotonic() + io_timeout
     while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("socket message deadline elapsed")
+        sock.settimeout(remaining)
         chunk = sock.recv(4096)
         if not chunk:
             raise RuntimeError("socket closed before a complete message was received")
         newline = chunk.find(b"\n")
+        total += newline if newline >= 0 else len(chunk)
+        if total > max_bytes:
+            raise RuntimeError("message exceeded %d bytes" % max_bytes)
         if newline >= 0:
             chunks.append(chunk[:newline])
             break
         chunks.append(chunk)
-        total += len(chunk)
-        if total > max_bytes:
-            raise RuntimeError("message exceeded %d bytes" % max_bytes)
-    return json.loads(b"".join(chunks).decode("utf-8"))
+    message = json.loads(b"".join(chunks).decode("utf-8"))
+    if not isinstance(message, dict):
+        raise ValueError("protocol message must be a JSON object")
+    return message
 
 
 def _kernel_wrapper(code, response_path):
@@ -351,6 +370,7 @@ except Exception:
 
 namespace = globals().setdefault("_ABAQUS_MCP_GLOBALS", {"__name__": "__abaqus_mcp_exec__", "__doc__": None})
 namespace.update({"mdb": mdb, "session": session})
+namespace.pop("result", None)
 
 stdout = io.StringIO()
 stderr = io.StringIO()
@@ -394,80 +414,104 @@ else:
         "stderr": captured_stderr,
     }
 
-with open(response_path, "w") as handle:
+temporary_response_path = response_path + ".tmp"
+with open(temporary_response_path, "w", encoding="utf-8") as handle:
     json.dump(payload, handle, ensure_ascii=False)
+os.replace(temporary_response_path, response_path)
 '''
     return template.replace("__ABAQUS_MCP_CODE__", encoded_code).replace("__ABAQUS_MCP_RESPONSE__", encoded_path)
 
 
-def _run_kernel_code(code, timeout):
-    response_path = os.path.join(tempfile.gettempdir(), "abaqus_mcp_%s.json" % uuid.uuid4().hex)
-    command = _kernel_wrapper(code, response_path)
-    _log("sendCommand start response_path=%s" % response_path)
-    sendCommand(command, False, False)
-
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        if os.path.exists(response_path):
-            with open(response_path, "r") as handle:
-                payload = json.load(handle)
-            try:
-                os.remove(response_path)
-            except Exception:
-                pass
-            _log("kernel response ok=%s" % payload.get("ok"))
-            return payload
-        time.sleep(0.03)
-
-    raise TimeoutError("timed out waiting for Abaqus kernel response")
+# Registry survives transport stop/start. No GUI work queue exists in network
+# threads: admission, status and heartbeat use only this thread-safe object.
+_REGISTRY = get_process_registry()
+_SERVER = globals().get("_SERVER")
+_SERVER_THREAD = globals().get("_SERVER_THREAD")
+_DISPATCHER = globals().get("_DISPATCHER")
+_PROCESSED = globals().get("_PROCESSED", 0)
+_START_TIME = globals().get("_START_TIME")
 
 
-class GuiRequest(object):
-    def __init__(self, method, params):
-        self.method = method
-        self.params = params
-        self.event = threading.Event()
-        self.result = None
-        self.error = None
+def _heartbeat():
+    active = _REGISTRY.active_operation()
+    observed = _REGISTRY.kernel_ready
+    return {
+        "connected": True,
+        "transport_connected": True,
+        # Admission readiness only: manual GUI/kernel work is not observed by
+        # this registry and native sendCommand can still block internally.
+        "kernel_ready": False if active else (True if observed else None),
+        "kernel_response_observed": observed,
+        "busy": active is not None,
+        "active_request_id": active.request_id if active else None,
+        "state": active.state if active else "idle",
+        "metadata_status": "unavailable",
+        "models": None,
+        "viewports": None,
+        "bridge": {
+            "version": __version__, "host": HOST, "port": PORT,
+            "transport": "socket", "processed": _PROCESSED,
+            "uptime_seconds": int(time.time() - _START_TIME) if _START_TIME else 0,
+            "gui_python": sys.version, "gui_platform": platform.platform(),
+            "log": LOG_PATH, "discovery_dir": DISCOVERY_DIR,
+        },
+    }
 
 
 class McpGuiHandler(socketserver.BaseRequestHandler):
     def handle(self):
-        request_id = None
+        wire_id = None
+        # Slow/incomplete socket peers must not block an unbounded read/write.
+        self.request.settimeout(min(DEFAULT_TIMEOUT, 10.0))
         try:
             message = _recv(self.request)
-            request_id = message.get("id")
+            wire_id = message.get("id")
             method = message.get("method")
             params = message.get("params") or {}
-            _log("request method=%s id=%s" % (method, request_id))
-
-            if _DISPATCHER is None:
-                raise RuntimeError("Abaqus MCP GUI dispatcher is not initialized")
-
-            wait_timeout = float(params.get("timeout") or DEFAULT_TIMEOUT) + 5.0
-            item = GuiRequest(method, params)
-            _REQUESTS.put(item)
-
-            if not item.event.wait(wait_timeout):
-                raise TimeoutError("timed out waiting for Abaqus GUI dispatcher")
-            if item.error is not None:
-                raise item.error
-
-            _send(self.request, {"id": request_id, "ok": True, "result": item.result})
+            if not isinstance(params, dict):
+                raise ValueError("params must be an object")
+            if method == "ping":
+                result = _heartbeat()
+            elif method == "stop":
+                # Compatibility for explicit stop_mcp.py requests: this closes
+                # transport only. It never stops CAE/kernel/solver work.
+                _REGISTRY.stop_admission()
+                stopper = threading.Thread(target=stop_gui_agent, name="AbaqusMcpTransportStop")
+                stopper.daemon = True
+                stopper.start()
+                result = {"success": True, "message": "transport stop requested; kernel work stays tracked"}
+            elif method == "request_status":
+                request_id = params.get("request_id")
+                if not isinstance(request_id, str) or not request_id.strip():
+                    raise ValueError("params.request_id must be a non-empty string")
+                result = _REGISTRY.status(request_id)
+            elif method == "execute":
+                if _DISPATCHER is None:
+                    raise RuntimeError("Abaqus MCP GUI dispatcher is not initialized")
+                code = params.get("code")
+                if not isinstance(code, str) or not code.strip():
+                    raise ValueError("params.code must be a non-empty string")
+                request_id = params.get("request_id", wire_id)
+                wait_timeout = positive_timeout(params.get("timeout", DEFAULT_TIMEOUT), "timeout")
+                queue_timeout = positive_timeout(params.get("queue_timeout", wait_timeout), "queue_timeout")
+                item = _REGISTRY.admit(request_id, method, params,
+                                       queue_timeout=queue_timeout, execution_timeout=wait_timeout)
+                result = _REGISTRY.wait(item)
+            else:
+                raise ValueError("unknown method: %r" % method)
+            response = {"id": wire_id, "ok": True, "result": result}
+        except BridgeError as exc:
+            response = {"id": wire_id, "ok": False, "error": exc.as_dict()}
         except Exception as exc:
-            _log("response error id=%s error=%s" % (request_id, exc))
-            _send(
-                self.request,
-                {
-                    "id": request_id,
-                    "ok": False,
-                    "error": {
-                        "message": str(exc),
-                        "type": "%s.%s" % (type(exc).__module__, type(exc).__name__),
-                        "traceback": traceback.format_exc(),
-                    },
-                },
-            )
+            _log("response error id=%s error=%s" % (wire_id, exc))
+            response = {"id": wire_id, "ok": False,
+                        "error": {"message": str(exc), "type": type(exc).__name__}}
+        try:
+            self.request.settimeout(min(DEFAULT_TIMEOUT, 10.0))
+            _send(self.request, response)
+        except Exception as exc:
+            # A disconnected caller never changes the active operation.
+            _log("response send failed id=%s error=%s" % (wire_id, exc))
 
 
 class McpGuiServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
@@ -475,58 +519,37 @@ class McpGuiServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     daemon_threads = True
 
 
-_SERVER = None
-_SERVER_THREAD = None
-_DISPATCHER = None
-_REQUESTS = queue.Queue()
-_PROCESSED = 0
-_START_TIME = None
+def _dispatch_one(item):
+    item.response_path = os.path.join(tempfile.gettempdir(), "abaqus_mcp_%s.json" % uuid.uuid4().hex)
+    command = _kernel_wrapper(item.params["code"], item.response_path)
+    _log("sendCommand request_id=%s response_path=%s" % (item.request_id, item.response_path))
+    # GUI thread only. Native sendCommand itself may block internally. There is
+    # no documented nonblocking option; bookkeeping is already marked running.
+    try:
+        sendCommand(command, False, False)
+    except Exception as exc:
+        _REGISTRY.note_pending(item.request_id, "native dispatch raised; outcome unknown: %s" % exc)
 
 
-def _handle_on_gui_thread(item):
-    method = item.method
-    params = item.params
-    timeout = float(params.get("timeout") or DEFAULT_TIMEOUT)
-
-    if method == "ping":
-        code = (
-            "import os, sys, platform\n"
-            "from abaqus import mdb, session\n"
-            "result = {'python': sys.version, 'executable': sys.executable, "
-            "'platform': platform.platform(), 'pid': os.getpid(), "
-            "'cpu_count': os.cpu_count(), 'cwd': os.getcwd(), "
-            "'abaqus_version': getattr(session, 'version', None), "
-            "'models': list(mdb.models.keys()), "
-            "'viewports': list(session.viewports.keys())}"
-        )
-        payload = _run_kernel_code(code, timeout)
-        result = payload.get("return_value") if payload.get("ok") else payload
-        if isinstance(result, dict):
-            result["bridge"] = {
-                "version": __version__,
-                "host": HOST,
-                "port": PORT,
-                "transport": "socket",
-                "processed": _PROCESSED,
-                "uptime_seconds": int(time.time() - _START_TIME) if _START_TIME else 0,
-                "gui_python": sys.version,
-                "gui_platform": platform.platform(),
-                "log": LOG_PATH,
-                "discovery_dir": DISCOVERY_DIR,
-            }
-        return result
-
-    if method == "execute":
-        code = params.get("code")
-        if not isinstance(code, str) or not code.strip():
-            raise ValueError("params.code must be a non-empty string")
-        return _run_kernel_code(code, timeout)
-
-    if method == "stop":
-        threading.Thread(target=stop_gui_agent, name="AbaqusMcpStopper").start()
-        return {"success": True, "message": "stop requested"}
-
-    raise ValueError("unknown method: %r" % method)
+def _poll_response_once(item):
+    global _PROCESSED
+    if not item.response_path or not os.path.exists(item.response_path):
+        return
+    try:
+        with open(item.response_path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        if not isinstance(payload, dict) or not isinstance(payload.get("ok"), bool):
+            raise ValueError("invalid kernel response envelope")
+    except Exception as exc:
+        _REGISTRY.note_diagnostic(item.request_id, "response read failed; outcome pending: %s" % exc)
+        return
+    # Published responses take precedence over elapsed execution wait deadlines.
+    _REGISTRY.complete(item.request_id, payload)
+    _PROCESSED += 1
+    try:
+        os.remove(item.response_path)
+    except Exception as exc:
+        _log("completed response cleanup failed: %s" % exc)
 
 
 def start_gui_agent(port=None):
@@ -541,6 +564,7 @@ def start_gui_agent(port=None):
     else:
         _log("starting socket bridge on %s:%s (user-selected)" % (HOST, PORT))
     _SERVER = McpGuiServer((HOST, PORT), McpGuiHandler)
+    _REGISTRY.start_admission()
     _SERVER_THREAD = threading.Thread(target=_SERVER.serve_forever, name="AbaqusMcpSocketBridge")
     _SERVER_THREAD.daemon = True
     _SERVER_THREAD.start()
@@ -548,6 +572,8 @@ def start_gui_agent(port=None):
 
     # Write discovery file for MCP server to find
     _DISCOVERY_PATH = _write_discovery_file(PORT)
+    if _DISPATCHER is not None:
+        _DISPATCHER.schedule_poll()
 
     return "Abaqus MCP socket bridge listening on %s:%s" % (HOST, PORT)
 
@@ -555,6 +581,7 @@ def start_gui_agent(port=None):
 def stop_gui_agent():
     global _SERVER, _SERVER_THREAD, _DISCOVERY_PATH
     server = _SERVER
+    _REGISTRY.stop_admission()
     if server is None:
         return "Abaqus MCP socket bridge is not running."
     try:
@@ -620,15 +647,25 @@ class McpGuiActionForm(AFXForm):
         FXMAPFUNC(self, SEL_COMMAND, self.ID_STOP, McpGuiActionForm.onCmdStop)
         FXMAPFUNC(self, SEL_COMMAND, self.ID_STATUS, McpGuiActionForm.onCmdStatus)
         FXMAPFUNC(self, SEL_TIMEOUT, self.ID_POLL, McpGuiActionForm.onTimeout)
-        _DISPATCHER = self
+        self._timer_scheduled = False
+        self._in_tick = False
+        # Menu entries share the first form as the sole dispatcher owner.
+        if _DISPATCHER is None:
+            _DISPATCHER = self
 
     def getFirstDialog(self):
         return None
 
     def schedule_poll(self):
+        if self is not _DISPATCHER:
+            return _DISPATCHER.schedule_poll()
+        if self._timer_scheduled:
+            return
         try:
+            self._timer_scheduled = True
             getAFXApp().addTimeout(50, self, self.ID_POLL)
         except Exception as exc:
+            self._timer_scheduled = False
             _log("schedule poll failed: %s" % exc)
 
     def onCmdActivate(self, sender, sel, ptr):
@@ -667,25 +704,32 @@ class McpGuiActionForm(AFXForm):
         return 1
 
     def onTimeout(self, sender, sel, ptr):
-        global _PROCESSED
-        processed = 0
-        while processed < 10:
-            try:
-                item = _REQUESTS.get_nowait()
-            except queue.Empty:
-                break
-            try:
-                item.result = _handle_on_gui_thread(item)
-                _PROCESSED += 1
-            except Exception as exc:
-                item.error = exc
-                _log("GUI handler error method=%s error=%s" % (item.method, exc))
-            finally:
-                item.event.set()
-            processed += 1
-
-        if _SERVER is not None:
-            self.schedule_poll()
+        if self is not _DISPATCHER:
+            return 1
+        # A delivered timer is consumed even when native GUI event processing
+        # invokes us reentrantly. The owning outer tick will schedule its heir.
+        self._timer_scheduled = False
+        if self._in_tick:
+            return 1
+        self._in_tick = True
+        try:
+            item = _REGISTRY.active_operation()
+            if item is not None and item.started_at is not None:
+                _poll_response_once(item)
+            elif _SERVER is not None:
+                item = _REGISTRY.claim_next()
+                if item is not None:
+                    _dispatch_one(item)
+        except Exception as exc:
+            # Never unlock or retry a possibly dispatched operation on errors.
+            _log("GUI tick failed; operation retained: %s" % exc)
+            item = _REGISTRY.active_operation()
+            if item is not None and item.started_at is not None:
+                _REGISTRY.note_pending(item.request_id, "GUI tick error: %s" % exc)
+        finally:
+            self._in_tick = False
+            if _SERVER is not None or _REGISTRY.active_operation() is not None:
+                self.schedule_poll()
         return 1
 
 

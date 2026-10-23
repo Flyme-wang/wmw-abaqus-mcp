@@ -1,72 +1,68 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>v5.2.0 验证记录</title><link rel="stylesheet" href="../assets/publication.css"></head>
-<body><div class="layout"><nav aria-label="Documentation"><div class="brand latin">wmw-abaqus-mcp<br><span class="version">v5.2.0</span></div><a href="index.html"><span class="han">中文说明</span></a><a href="english.html">English</a><a href="changelog.html"><span class="han">版本记录</span> / Changelog</a><a class="active" aria-current="page" href="validation.html"><span class="han">验证范围</span> / Validation</a><a href="publication-style.html"><span class="han">排版</span> / Typography</a></nav>
-<main><div class="font-samples"><span id="font-zh-sample" class="han">中文：微软雅黑</span> · <span id="font-en-sample" class="latin">English: Times New Roman</span></div><h1 id="v520-验证记录">v5.2.0 <span class="han">验证记录</span></h1>
-<p><strong><span class="han">日期：</span>2026-10-15<span class="han">；范围：独立公开发布副本。</span></strong></p>
-<p><span class="han">原在用桥接的版本常量为</span> <strong>5.2.0</strong><span class="han">。本次同步保留通信及求解逻辑，只统一项目标识、</span>GUI <span class="han">菜单和包版本，更新可移植配置、文档及验证材料。</span></p>
-<h2 id="检查项目"><span class="han">检查项目</span></h2>
+<title>v6.0.0 源码候选版验证记录</title><link rel="stylesheet" href="../assets/publication.css"></head>
+<body><div class="layout"><nav aria-label="Documentation"><div class="brand latin">wmw-abaqus-mcp<br><span class="version">v6.0.0</span></div><a href="index.html"><span class="han">中文说明</span></a><a href="english.html">English</a><a href="changelog.html"><span class="han">版本记录</span> / Changelog</a><a class="active" aria-current="page" href="validation.html"><span class="han">验证范围</span> / Validation</a><a href="publication-style.html"><span class="han">排版</span> / Typography</a></nav>
+<main><div class="font-samples"><span id="font-zh-sample" class="han">中文：微软雅黑</span> · <span id="font-en-sample" class="latin">English: Times New Roman</span></div><h1 id="v600-源码候选版验证记录">v6.0.0 <span class="han">源码候选版验证记录</span></h1>
+<p><strong><span class="han">日期：</span>2026-10-23<span class="han">；状态：源码候选版，仅同步</span> GitHub <span class="han">源码，未创建正式</span> Release<span class="han">，未安装到现有</span> CAE<span class="han">。</span></strong></p>
+<p><span class="han">本版按用户确认的四项需求改动：单会话单执行、</span>GUI <span class="han">短回调、请求状态与超时核实、提交和完成监测分离。由于</span> <code>submit_job</code> <span class="han">的完成语义发生变化，主版本升级到</span> 6.0.0<span class="han">。</span></p>
+<h2 id="验证方法"><span class="han">验证方法</span></h2>
+<ul>
+<li><span class="han">使用真实标准库请求注册表，验证并发准入、稳定编号去重、排队过期、执行超时保留占位和真实回执释放。</span></li>
+<li>GUI <span class="han">适配器只替换</span> Abaqus <span class="han">原生边界；检查单次派发、回调重入、后续</span> tick <span class="han">回收结果、停止接收时不丢失在途操作。</span></li>
+<li><span class="han">网络集成只使用系统分配端口上的独立假桥接，保护测试不能连接已有</span> CAE <span class="han">端点。</span></li>
+<li>MCP <span class="han">超时恢复只允许查询原请求状态；测试固定端点、晚到结果、未知结果和禁止重复</span> execute<span class="han">。</span></li>
+<li><span class="han">作业使用假对象，确认只调用提交、不等待整个求解；具名监测返回实际状态和读取错误。未提交真实计算。</span></li>
+<li><span class="han">菜单加载器和启动钩子均有搜索路径回归测试，确认新</span> <code>bridge_runtime.py</code> <span class="han">可由源码目录导入。</span></li>
+<li><span class="han">原有</span> 8 <span class="han">项端口</span>/<span class="han">路由基线保留。历史发布记录见</span> <a href="../validation-5.2.0.md">5.2.0 <span class="han">验证</span></a><span class="han">。</span></li>
+</ul>
+<h2 id="本轮实测结果"><span class="han">本轮实测结果</span></h2>
 <table>
 <thead>
 <tr>
-  <th><span class="han">项目</span></th>
-  <th><span class="han">实际结果</span></th>
+  <th><span class="han">检查项</span></th>
+  <th><span class="han">本轮结果</span></th>
 </tr>
 </thead>
 <tbody>
 <tr>
-  <td>Python <span class="han">语法、</span>JSON<span class="han">、</span>TOML</td>
-  <td><span class="han">通过；版本元数据为</span> 5.2.0<span class="han">，</span>TOML <span class="han">无</span> BOM</td>
+  <td><span class="han">离线回归测试</span></td>
+  <td><strong>64 <span class="han">项通过</span></strong><span class="han">；包含原有</span> 8 <span class="han">项、加载器</span> 2 <span class="han">项及本次执行控制回归</span></td>
 </tr>
 <tr>
-  <td><span class="han">多端口与会话路由</span></td>
-  <td><strong>8 <span class="han">项</span> unittest <span class="han">通过</span></strong><span class="han">；两个</span> OS <span class="han">分配端口的</span> fake TCP bridge<span class="han">，禁止连接其他端点</span></td>
+  <td>MCP stdio <span class="han">工具与资源发现</span></td>
+  <td><strong>17 tools<span class="han">、</span>4 resources<span class="han">、</span>0 bridge calls</strong><span class="han">；</span>initialize <span class="han">与</span> schema <span class="han">检查通过</span></td>
 </tr>
 <tr>
-  <td><span class="han">端口选择</span></td>
-  <td><span class="han">自动选择首个可用端口；显式端口成功、占用错误；范围耗尽错误</span></td>
+  <td>wheel <span class="han">构建与隔离导入</span></td>
+  <td><strong><span class="han">通过</span></strong><span class="han">；隔离</span> target <span class="han">安装为</span> 6.0.0<span class="han">，包含</span> bridge_runtime<span class="han">；未导入真实</span> Abaqus</td>
 </tr>
 <tr>
-  <td>MCP stdio</td>
-  <td>initialize<span class="han">、</span>tools/list<span class="han">、</span>resources/list <span class="han">通过；名称</span> wmw-abaqus-mcp<span class="han">，</span><strong>16 tools<span class="han">、</span>4 resources</strong><span class="han">，未发出</span> CAE bridge <span class="han">请求</span></td>
+  <td><span class="han">本地</span> HTML <span class="han">与字体预览</span></td>
+  <td><strong><span class="han">通过</span></strong><span class="han">；</span>1440 / 390 px <span class="han">无页面横向溢出；</span>CDP <span class="han">实测</span> Microsoft YaHei / Times New Roman</td>
 </tr>
 <tr>
-  <td><span class="han">工具参数</span></td>
-  <td>13 <span class="han">个</span> CAE <span class="han">工具均包含可选</span> session_id</td>
+  <td><span class="han">真实</span> CAE / <span class="han">大文件卡顿</span></td>
+  <td><strong><span class="han">未验证</span></strong></td>
 </tr>
 <tr>
-  <td>Python <span class="han">打包</span></td>
-  <td>wheel <span class="han">构建、隔离</span> target <span class="han">安装</span>/import<span class="han">、</span>editable target <span class="han">安装通过</span></td>
-</tr>
-<tr>
-  <td><span class="han">源码追溯</span></td>
-  <td><span class="han">发布</span> Python <span class="han">文件与</span> source-manifest.json <span class="han">的</span> SHA-256 <span class="han">匹配；核心代码</span> diff <span class="han">仅为声明的名称</span>/<span class="han">菜单</span>/<span class="han">说明字符串</span></td>
-</tr>
-<tr>
-  <td><span class="han">公开文件</span></td>
-  <td>allowlist <span class="han">与敏感模式扫描通过，排除环境、缓存、模型、日志和结果</span></td>
-</tr>
-<tr>
-  <td><span class="han">本地</span> HTML</td>
-  <td>5 <span class="han">页；本地链接</span>/<span class="han">片段有效，代码可见文本与源</span> Markdown <span class="han">保持一致；安装</span>/<span class="han">操作文档</span> 12 <span class="han">个代码块实际复制通过（按</span> Windows <span class="han">换行规则核对）</span></td>
-</tr>
-<tr>
-  <td><span class="han">字体与布局</span></td>
-  <td>Chromium <span class="han">在</span> 1440 / 390 px <span class="han">预览；</span>CDP <span class="han">实测中文</span> Microsoft YaHei<span class="han">、英文</span> Times New Roman<span class="han">，无页面横向溢出或标题裁切</span></td>
+  <td><span class="han">真实模型与求解器</span></td>
+  <td><strong><span class="han">未运行</span></strong></td>
 </tr>
 </tbody>
 </table>
-<p><span class="han">测试环境：</span><strong>Windows<span class="han">、</span>CPython 3.12.10<span class="han">、</span>MCP SDK 1.27.2</strong><span class="han">。打包时依赖按</span> pyproject.toml <span class="han">解析；没有将</span> <code>mcp&gt;=1.0</code> <span class="han">的所有版本都表述为已验证。</span></p>
-<p><span class="han">复核命令（使用已安装依赖的外部</span> Python<span class="han">）：</span></p>
+<p><span class="han">复核命令使用外部</span> Python<span class="han">：</span></p>
+<p><span class="han">测试环境：</span>Windows<span class="han">、</span>CPython <strong>3.12.10</strong><span class="han">、</span>MCP SDK <strong>1.27.2</strong><span class="han">；另用</span> Python 3.10 <span class="han">语法规则检查所有运行模块。语法兼容检查不能替代实际</span> Abaqus 2024 GUI <span class="han">集成验证。</span></p>
 <pre><code class="language-powershell">python -B -m unittest discover -s tests -v
 python -B scripts/check_mcp_stdio.py
 python -m pip wheel --no-deps --wheel-dir .qa/wheels .
 python scripts/build_publication.py
 </code></pre>
-<h2 id="适用范围"><span class="han">适用范围</span></h2>
-<p><strong><span class="han">隔离测试使用</span> fake TCP JSON endpoints<span class="han">，不连接正在运行的</span> CAE<span class="han">。</span></strong> <span class="han">本次发布不重新启动</span> CAE<span class="han">、不修改现有模型、不提交求解器作业。</span></p>
-<p><span class="han">没有将离线检查或模型作业完成视为科学模型验收。未验证其他</span> Abaqus <span class="han">版本、</span>Linux/macOS GUI<span class="han">、远程网络部署或所有</span> ODB/<span class="han">截图工作流。</span><code>abaqus://status</code> <span class="han">与</span> <code>abaqus://session-telemetry</code> <span class="han">的默认端点限制保留并在</span> README <span class="han">明示。</span></p>
-<h2 id="源码追溯"><span class="han">源码追溯</span></h2>
-<p><a href="../source-manifest.json">source-manifest.json</a> <span class="han">保存原始主插件、</span>server<span class="han">、停止脚本与</span> loader <span class="han">的</span> SHA-256<span class="han">；发布副本仅做声明的品牌修改。发布</span> ZIP <span class="han">另附</span> SHA256SUMS<span class="han">。</span></p>
+<h2 id="原生-api-和部署边界"><span class="han">原生</span> API <span class="han">和部署边界</span></h2>
+<p><code>sendCommand</code> <span class="han">仍通过</span> GUI <span class="han">线程进入</span> Abaqus <span class="han">内核。本版移除插件自身的循环等待，不使用未公开的异步参数或任意后台线程调用</span> Abaqus API<span class="han">。原生调用内部耗时及是否释放</span> GIL <span class="han">尚未实测，因此旁路状态查询</span>“<span class="han">不进入</span> GUI <span class="han">队列</span>”<span class="han">不等于任何情况下网络线程都能立即回应。</span></p>
+<p><span class="han">超时或暂时读不到响应时，已派发操作仍被跟踪，不释放占位、不重发、不自动终止。只有真实完成回执能确认结果。未知或已回收的记录不能作为安全重放的依据。历史结果和去重信息有上限，活动操作不被回收；容量耗尽会明确报错，不通过自动重启清空状态。</span></p>
+<p><span class="han">本地开发不覆盖原工作目录或插件缓存，不改本机环境变量和</span> MCP <span class="han">配置，不热加载、不关闭现有</span> CAE <span class="han">或求解器。后续迁移步骤见</span> <a href="../upgrade.md"><span class="han">安装与验收</span></a><span class="han">。</span></p>
+<p><span class="han">作业目录仅在成功提交后更新，并以最多</span> 128 <span class="han">条</span> MDB/Job <span class="han">弱引用记录校验。真实</span> Abaqus <span class="han">对象若不支持弱引用或代理身份变化，监测明确回退当前目录并报告原因；该实际兼容性尚未验证。已离线覆盖提交被拒后保留旧目录、同名作业替换、</span>MDB <span class="han">替换及弱引用不支持四种边界。</span></p>
+<h2 id="来源指纹"><span class="han">来源指纹</span></h2>
+<p><a href="../source-manifest.json">source-manifest.json</a> <span class="han">保留上游原始</span> SHA-256 <span class="han">和</span> 5.2.0 <span class="han">发布指纹，并记录本候选版的改动指纹。版本号与离线测试通过均不构成真实</span> CAE <span class="han">或科学模型验收。</span></p>
 
 <footer><span class="han">由仓库</span> Markdown <span class="han">生成本地</span> HTML<span class="han">；</span>GitHub <span class="han">原生</span> Markdown <span class="han">字体由平台控制。</span><br><a href="../validation.md"><span class="han">查看源文档</span></a></footer></main></div></body></html>
